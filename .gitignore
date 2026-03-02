@@ -1,0 +1,20 @@
+# build outputs
+*.ex5
+*.ex4
+
+# logs / tester
+*.log
+MQL5/Logs/
+MQL5/Files/
+MQL5/Tester/
+Tester/
+Logs/
+
+# caches
+*.tmp
+*.cache
+
+# Windows / IDE
+.DS_Store
+Thumbs.db
+.vscode/
