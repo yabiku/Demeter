@@ -20,7 +20,7 @@
 #include <Controls/Label.mqh>
 
 #include <Object.mqh>
-#include <Generic\HashMap.mqh>
+#include <Generic/HashMap.mqh>
 
 long MAGIC[] = {-1, 0, 10, 20, 30}; //最初は-1とするRescueモード
 string prefix[] = {"Rescue", "NonEA", "EA1", "EA2", "EA3"};
