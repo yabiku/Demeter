@@ -773,6 +773,7 @@ void CloseAllPositions(ENUM_POSITION_TYPE pos_type, long magic) {
       weightAverageBuy[magic_idx] = 0.0;
       EABuyProfits[magic_idx] = 0.0;
       panel.setLblNanpin(POSITION_TYPE_BUY, 0, magic_idx);
+      panel.setLblProfits(POSITION_TYPE_BUY, 0, magic_idx);
    } else {
       HighestPriceTicketNo[magic_idx] = 0;
       nextSellNanpinPrice[magic_idx] = 0.0;
@@ -780,6 +781,7 @@ void CloseAllPositions(ENUM_POSITION_TYPE pos_type, long magic) {
       weightAverageSell[magic_idx] = 0.0;
       EASellProfits[magic_idx] = 0.0;
       panel.setLblNanpin(POSITION_TYPE_SELL, 0, magic_idx);
+      panel.setLblProfits(POSITION_TYPE_SELL, 0, magic_idx);
    }
    
    if(pos_type == POSITION_TYPE_BUY) {
@@ -1064,6 +1066,7 @@ void getEAProfits() {
          EASellProfits[0] +=EASellProfits[ArrayBsearch(MAGIC, p.magic)];
       }
    }
+//   Print("NonEA=", EABuyProfits[0]);
 }
 
 void getNanpinDiff() {
