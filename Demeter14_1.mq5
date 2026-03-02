@@ -380,12 +380,7 @@ int OnInit()
    
    getAllPositionInfo();
    getWeightAverage();
-   
-   for(int i=1; i<(int)MAGIC.Size(); i++) {
-      nextNanpinPriceTime(POSITION_TYPE_BUY, i);
-      nextNanpinPriceTime(POSITION_TYPE_SELL,i);      
-   }
-            
+               
    if(!panel.CreatePanel(ChartID()))
    {
       Print("パネル作成失敗");
@@ -403,6 +398,12 @@ int OnInit()
    ObjectSetInteger(0, lblStatus, OBJPROP_XDISTANCE, 10);
    ObjectSetInteger(0, lblStatus, OBJPROP_YDISTANCE, 40);
    ObjectSetInteger(0, lblStatus, OBJPROP_FONTSIZE, 13);
+
+   //パネル表示するやつは、パネルが表示されてから値をいれる
+   for(int i=1; i<(int)MAGIC.Size(); i++) {
+      nextNanpinPriceTime(POSITION_TYPE_BUY, i);
+      nextNanpinPriceTime(POSITION_TYPE_SELL,i);      
+   }
    
    return INIT_SUCCEEDED;
 }
@@ -454,7 +455,9 @@ void OnTick() {
       }
 
       //利確処理
-      if(weightAverageBuy[i] > 0.0 && (weightAverageBuy[i] + TrailStart*10*Point()) <= ask ) CloseAllPositions(POSITION_TYPE_BUY, MAGIC[i]);
+      if(weightAverageBuy[i] > 0.0 && (weightAverageBuy[i] + TrailStart*10*Point()) <= ask ) {
+         CloseAllPositions(POSITION_TYPE_BUY, MAGIC[i]);
+      }
       if(weightAverageSell[i] > 0.0 && (weightAverageSell[i] - TrailStart*10*Point()) >= bid) CloseAllPositions(POSITION_TYPE_SELL, MAGIC[i]);
 
       //エントリー
@@ -879,7 +882,7 @@ void nextNanpinPriceTime(ENUM_POSITION_TYPE pos_type, int magic_idx) {
    CPosInfo *p;
    
    getNanpinDiff();
- 
+       
    double nanpin_diff = NormalizeDouble(nanpin_haba*10*Point(), Digits());
    long nanpin_time_diff = 60*nanpin_late_time;
    
@@ -889,8 +892,8 @@ void nextNanpinPriceTime(ENUM_POSITION_TYPE pos_type, int magic_idx) {
       if(posMap.TryGetValue(LowestPriceTicketNo[magic_idx], p)) {
          nextBuyNanpinPrice[magic_idx] = NormalizeDouble( p.entry_price - nanpin_diff, Digits());
          nextBuyNanpinTime[magic_idx] = p.entry_time + (datetime)nanpin_time_diff;
-//         Print(magic_idx, " hoge1=", nextBuyNanpinPrice[magic_idx]);
          panel.setLblNanpin(POSITION_TYPE_BUY, nextBuyNanpinPrice[magic_idx], magic_idx);
+         Print("magic=", MAGIC[magic_idx], " nextBuyNanpinTime=", convertToJapanTime(account_company_name,nextBuyNanpinTime[magic_idx]));
       }
    } else {
       nextSellNanpinPrice[magic_idx] = 0.0;
@@ -899,9 +902,9 @@ void nextNanpinPriceTime(ENUM_POSITION_TYPE pos_type, int magic_idx) {
          nextSellNanpinPrice[magic_idx] = NormalizeDouble( p.entry_price + nanpin_diff, Digits());
          nextSellNanpinTime[magic_idx] = p.entry_time + (datetime)nanpin_time_diff;
          panel.setLblNanpin(POSITION_TYPE_SELL, nextSellNanpinPrice[magic_idx], magic_idx);
+         Print("magic=", MAGIC[magic_idx], " nextSellNanpinTime=", convertToJapanTime(account_company_name,nextSellNanpinTime[magic_idx]));
       }
    }
-   
 }
 
 double getLots(ulong ticket, double lots_bairitu) {
@@ -928,6 +931,13 @@ void getWeightAverage() {
    double pricexvolumesBuy[MAGIC.Size()];
    double pricexvolumesSell[MAGIC.Size()];
    int magic_idx;
+   
+   for(int i=0; i<(int)MAGIC.Size(); i++) {
+      volumesBuy[i] = 0;
+      volumesSell[i] = 0;
+      pricexvolumesBuy[i] = 0;
+      pricexvolumesSell[i] = 0;
+   }
 
    for(int i=0; i<n; i++)
    {
@@ -1066,7 +1076,6 @@ void getEAProfits() {
          EASellProfits[0] +=EASellProfits[ArrayBsearch(MAGIC, p.magic)];
       }
    }
-//   Print("NonEA=", EABuyProfits[0]);
 }
 
 void getNanpinDiff() {
