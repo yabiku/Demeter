@@ -462,17 +462,17 @@ void OnTick() {
       }
 
       //利確処理
-      if(panel.getBuyCheckBox()) {
+      if(i==0 && panel.getBuyCheckBox()) {
          //レスキューモード
          if(weightAverageBuy[i] > 0.0 && (weightAverageBuy[i] + TrailStart*10*Point()) <= ask ) CloseAllPositions(POSITION_TYPE_BUY, MAGIC[i]);
       } else {
-         TrailingStop(POSITION_TYPE_BUY, bid, i);
+         if(i!=0) TrailingStop(POSITION_TYPE_BUY, bid, i);
       }
-      if(panel.getSellCheckBox()) {
+      if(i==0 && panel.getSellCheckBox()) {
          //レスキューモード
          if(weightAverageSell[i] > 0.0 && (weightAverageSell[i] - TrailStart*10*Point()) >= bid) CloseAllPositions(POSITION_TYPE_SELL, MAGIC[i]);
       } else {
-         TrailingStop(POSITION_TYPE_SELL, ask, i);
+         if(i!=0) TrailingStop(POSITION_TYPE_SELL, ask, i);
       }
 
       //エントリー
@@ -732,6 +732,7 @@ void FreeAll()
       trailStart_sell_price[i] = 0.0;
       trail_buy_price[i] = 0.0;
       trail_sell_price[i] = 0.0;
+      ObjectsDeleteAll(0, prefix[i], -1, OBJ_HLINE);
    }
 }
 
@@ -798,6 +799,9 @@ void CloseAllPositions(ENUM_POSITION_TYPE pos_type, long magic) {
       panel.setLblProfits(POSITION_TYPE_BUY, 0, magic_idx);
       trailStart_buy_price[magic_idx] = 0.0;
       trail_buy_price[magic_idx] = 0.0;
+      ObjectsDeleteAll(0, prefix[magic_idx]+"_buy_start", -1, OBJ_HLINE);
+      ObjectsDeleteAll(0, prefix[magic_idx]+"_buy_trail", -1, OBJ_HLINE);
+
    } else {
       HighestPriceTicketNo[magic_idx] = 0;
       nextSellNanpinPrice[magic_idx] = 0.0;
@@ -808,6 +812,8 @@ void CloseAllPositions(ENUM_POSITION_TYPE pos_type, long magic) {
       panel.setLblProfits(POSITION_TYPE_SELL, 0, magic_idx);
       trailStart_sell_price[magic_idx] = 0.0;
       trail_sell_price[magic_idx] = 0.0;
+      ObjectsDeleteAll(0, prefix[magic_idx]+"_sell_start", -1, OBJ_HLINE);
+      ObjectsDeleteAll(0, prefix[magic_idx]+"_sell_trail", -1, OBJ_HLINE);
    }
    
    if(pos_type == POSITION_TYPE_BUY) {
@@ -916,7 +922,6 @@ void nextNanpinPriceTime(ENUM_POSITION_TYPE pos_type, int magic_idx) {
          nextBuyNanpinPrice[magic_idx] = NormalizeDouble( p.entry_price - nanpin_diff, Digits());
          nextBuyNanpinTime[magic_idx] = p.entry_time + (datetime)nanpin_time_diff;
          panel.setLblNanpin(POSITION_TYPE_BUY, nextBuyNanpinPrice[magic_idx], magic_idx);
-         Print("magic=", MAGIC[magic_idx], " nextBuyNanpinTime=", convertToJapanTime(account_company_name,nextBuyNanpinTime[magic_idx]));
       }
    } else {
       nextSellNanpinPrice[magic_idx] = 0.0;
@@ -925,7 +930,6 @@ void nextNanpinPriceTime(ENUM_POSITION_TYPE pos_type, int magic_idx) {
          nextSellNanpinPrice[magic_idx] = NormalizeDouble( p.entry_price + nanpin_diff, Digits());
          nextSellNanpinTime[magic_idx] = p.entry_time + (datetime)nanpin_time_diff;
          panel.setLblNanpin(POSITION_TYPE_SELL, nextSellNanpinPrice[magic_idx], magic_idx);
-         Print("magic=", MAGIC[magic_idx], " nextSellNanpinTime=", convertToJapanTime(account_company_name,nextSellNanpinTime[magic_idx]));
       }
    }
 }
@@ -1172,30 +1176,56 @@ void TrailingStop(ENUM_POSITION_TYPE pos_type, double price, int magic_idx) {
    double trail_interval_diff = TrailInterval*10*Point();
 
    if(weightAverageBuy[magic_idx] > 0 && pos_type == POSITION_TYPE_BUY) {
+      //トレイル開始ライン
+      if(ObjectFind(0, prefix[magic_idx]+"_buy_start") < 0) {
+         CreateHBLine(prefix[magic_idx]+"_buy_start", trailStart_buy_price[magic_idx], clr_buy[magic_idx], STYLE_DASHDOT);
+      } else {
+         if(trailStart_buy_price[magic_idx] != ObjectGetDouble(0, prefix[magic_idx]+"_buy_start",OBJPROP_PRICE)) MoveHBLine(prefix[magic_idx]+"_buy_start", trailStart_buy_price[magic_idx]);
+      }
       //トレイル開始
       if(trail_buy_price[magic_idx] == 0.0 && price >= trailStart_buy_price[magic_idx]) {
          trail_buy_price[magic_idx] = price - trail_interval_diff;
       }
       if(trail_buy_price[magic_idx] > 0) {
+         if(ObjectFind(0, prefix[magic_idx]+"_buy_start") >= 0) ObjectsDeleteAll(0, prefix[magic_idx]+"_buy_start", -1, OBJ_HLINE);
+         if(ObjectFind(0, prefix[magic_idx]+"_buy_trail") < 0) {
+            CreateHBLine(prefix[magic_idx]+"_buy_trail", trail_buy_price[magic_idx], clr_buy[magic_idx], STYLE_DASHDOT);
+         } else {
+            MoveHBLine(prefix[magic_idx]+"_buy_trail", trail_buy_price[magic_idx]);
+         }
          if(price <= trail_buy_price[magic_idx] && EABuyProfits[magic_idx] > 0) {
             CloseAllPositions(POSITION_TYPE_BUY, MAGIC[magic_idx]);
             return;
          }
+         //トレイル価格の更新
          if((price - trail_buy_price[magic_idx]) > trail_interval_diff) {
             trail_buy_price[magic_idx] = price - trail_interval_diff;
          }
       }
    }
    if(weightAverageSell[magic_idx] > 0 && pos_type == POSITION_TYPE_SELL) {
+      //トレイル開始ライン
+      if(ObjectFind(0, prefix[magic_idx]+"_sell_start") < 0) {
+         CreateHBLine(prefix[magic_idx]+"_sell_start", trailStart_sell_price[magic_idx], clr_sell[magic_idx], STYLE_DASHDOT);
+      } else {
+         if(trailStart_sell_price[magic_idx] != ObjectGetDouble(0, prefix[magic_idx]+"_sell_start",OBJPROP_PRICE)) MoveHBLine(prefix[magic_idx]+"_sell_start", trailStart_sell_price[magic_idx]);
+      }
       //トレイル開始
       if(trail_sell_price[magic_idx] == 0.0 && price <= trailStart_sell_price[magic_idx]) {
          trail_sell_price[magic_idx] = price + trail_interval_diff;
       }
       if(trail_sell_price[magic_idx] > 0) {
+         if(ObjectFind(0, prefix[magic_idx]+"_sell_start") >= 0) ObjectsDeleteAll(0, prefix[magic_idx]+"_sell_start", -1, OBJ_HLINE);
+         if(ObjectFind(0, prefix[magic_idx]+"_sell_trail") < 0) {
+            CreateHBLine(prefix[magic_idx]+"_sell_trail", trail_sell_price[magic_idx], clr_sell[magic_idx], STYLE_DASHDOT);
+         } else {
+            MoveHBLine(prefix[magic_idx]+"_sell_trail", trail_sell_price[magic_idx]);
+         }
          if(price >= trail_sell_price[magic_idx] && EASellProfits[magic_idx] > 0) {
             CloseAllPositions(POSITION_TYPE_SELL, MAGIC[magic_idx]);
             return;
          }
+         //トレイル価格の更新
          if((trail_sell_price[magic_idx] - price) > trail_interval_diff) {
             trail_sell_price[magic_idx] = price + trail_interval_diff;
          }
