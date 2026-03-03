@@ -68,7 +68,7 @@ input double toRescue = 10000; //レスキュー移行価格（円）
 input double RescueBuyTP = 2500; //レスキューモードBuy利確価格(0は利確しない)
 input double RescueSellTP = 2500; //レスキューモードSell利確価格(0は利確しない)
 
-input double TrailStart = 8.0; //トレール開始値
+input double TrailStart = 9.0; //トレール開始値
 input double TrailInterval = 4.0; //トレール幅
 input double SpreadFilter = 5.0; //スプレッドフィルター
 input double plusTP = 2.0; //プラ転決済
@@ -99,6 +99,9 @@ double weightAverageSell[MAGIC.Size()]; //MAGIC毎の加重平均価格(Sell))
 
 double EABuyProfits[MAGIC.Size()]; //MAGIC毎の損益(Buy)
 double EASellProfits[MAGIC.Size()]; //MAGIC毎の損益(Sell)
+
+double trail_buy_price[MAGIC.Size()]; //Trailing価格(Buy)
+double trail_sell_price[MAGIC.Size()];////Trailing価格(Sell)
 
 //EA1用パラメータ RSIとボリバン
 CiRSI CiRsiEA1;
@@ -402,7 +405,9 @@ int OnInit()
    //パネル表示するやつは、パネルが表示されてから値をいれる
    for(int i=1; i<(int)MAGIC.Size(); i++) {
       nextNanpinPriceTime(POSITION_TYPE_BUY, i);
-      nextNanpinPriceTime(POSITION_TYPE_SELL,i);      
+      nextNanpinPriceTime(POSITION_TYPE_SELL,i);
+      trail_buy_price[i] = 0.0;
+      trail_sell_price[i] = 0.0;
    }
    
    return INIT_SUCCEEDED;
@@ -455,10 +460,18 @@ void OnTick() {
       }
 
       //利確処理
-      if(weightAverageBuy[i] > 0.0 && (weightAverageBuy[i] + TrailStart*10*Point()) <= ask ) {
-         CloseAllPositions(POSITION_TYPE_BUY, MAGIC[i]);
+      if(panel.getBuyCheckBox()) {
+         //レスキューモード
+         if(weightAverageBuy[i] > 0.0 && (weightAverageBuy[i] + TrailStart*10*Point()) <= ask ) CloseAllPositions(POSITION_TYPE_BUY, MAGIC[i]);
+      } else {
+         TrailingStop(POSITION_TYPE_BUY, bid, i);
       }
-      if(weightAverageSell[i] > 0.0 && (weightAverageSell[i] - TrailStart*10*Point()) >= bid) CloseAllPositions(POSITION_TYPE_SELL, MAGIC[i]);
+      if(panel.getSellCheckBox()) {
+         //レスキューモード
+         if(weightAverageSell[i] > 0.0 && (weightAverageSell[i] - TrailStart*10*Point()) >= bid) CloseAllPositions(POSITION_TYPE_SELL, MAGIC[i]);
+      } else {
+         TrailingStop(POSITION_TYPE_SELL, ask, i);
+      }
 
       //エントリー
       int sig_entry = EntrySignal(MAGIC[i]);
@@ -713,6 +726,8 @@ void FreeAll()
       weightAverageSell[i] = 0.0;
       EABuyProfits[i] = 0.0;
       EASellProfits[i] = 0.0;
+      trail_buy_price[i] = 0.0;
+      trail_sell_price[i] = 0.0;
    }
 }
 
@@ -777,6 +792,7 @@ void CloseAllPositions(ENUM_POSITION_TYPE pos_type, long magic) {
       EABuyProfits[magic_idx] = 0.0;
       panel.setLblNanpin(POSITION_TYPE_BUY, 0, magic_idx);
       panel.setLblProfits(POSITION_TYPE_BUY, 0, magic_idx);
+      trail_buy_price[magic_idx] = 0.0;
    } else {
       HighestPriceTicketNo[magic_idx] = 0;
       nextSellNanpinPrice[magic_idx] = 0.0;
@@ -785,6 +801,7 @@ void CloseAllPositions(ENUM_POSITION_TYPE pos_type, long magic) {
       EASellProfits[magic_idx] = 0.0;
       panel.setLblNanpin(POSITION_TYPE_SELL, 0, magic_idx);
       panel.setLblProfits(POSITION_TYPE_SELL, 0, magic_idx);
+      trail_sell_price[magic_idx] = 0.0;
    }
    
    if(pos_type == POSITION_TYPE_BUY) {
@@ -1005,7 +1022,7 @@ int IsEntryOK() {
 }
 
 //エントリーロジック
-int EntrySignal(long magic=0) {
+int EntrySignal(long magic) {
    // 戻値 0 シグナル無し
    // 　　　　1 ロング
    //     -1 ショート
@@ -1021,10 +1038,15 @@ int EntrySignal(long magic=0) {
       CiBandsEA1.Refresh();
             
       // RSI < 30 && LowerBands > Bid() ならロング
-      if( CiRsiEA1.Main(0) < 30 && CiBandsEA1.Lower(0) > Csymbol.Bid()) return(1);
-      
+      if( CiRsiEA1.Main(0) < 30 && CiBandsEA1.Lower(0) > Csymbol.Bid()) {
+         Print("EntrySignal=Long");
+         return(1);
+      }
       //  RSI > 70 && UpperBand < Bid() ならショート
-      if(CiRsiEA1.Main(0) > 70 && CiBandsEA1.Upper(0) < Csymbol.Bid()) return(-1);
+      if(CiRsiEA1.Main(0) > 70 && CiBandsEA1.Upper(0) < Csymbol.Bid()) {
+         Print("EntrySignal=Short");
+         return(-1);
+      }
    }
    
    if(magic == MAGIC[2]) {
@@ -1053,7 +1075,7 @@ bool IsNoEntry(ENUM_POSITION_TYPE pos_type) {
 }
 
 void getEAProfits() {
-      ulong   keys[];
+   ulong   keys[];
    CPosInfo *values[];
 
    for(int i=0; i<(int)MAGIC.Size(); i++) {
@@ -1132,6 +1154,44 @@ void getNanpinDiff() {
          nanpin_late_time = 0;
       }
    }
-   
-   
+}
+
+void TrailingStop(ENUM_POSITION_TYPE pos_type, double price, int magic_idx) {
+   double trail_start_price = 0.0;
+   double trail_interval_diff = TrailInterval*10*Point();
+
+   if(weightAverageBuy[magic_idx] > 0 && pos_type == POSITION_TYPE_BUY) {
+      //トレイル開始価格
+      trail_start_price = weightAverageBuy[magic_idx] + trail_interval_diff;
+      //トレイル開始
+      if(trail_buy_price[magic_idx] == 0.0 && price >= trail_start_price) {
+         trail_buy_price[magic_idx] = price - trail_interval_diff;
+      }
+      if(trail_buy_price[magic_idx] > 0) {
+         if(price <= trail_buy_price[magic_idx] && EABuyProfits[magic_idx] > 0) {
+            CloseAllPositions(POSITION_TYPE_BUY, MAGIC[magic_idx]);
+            return;
+         }
+         if((price - trail_buy_price[magic_idx]) > trail_interval_diff) {
+            trail_buy_price[magic_idx] = price - trail_interval_diff;
+         }
+      }
+   }
+   if(weightAverageSell[magic_idx] > 0 && pos_type == POSITION_TYPE_SELL) {
+      //トレイル開始価格
+      trail_start_price = weightAverageSell[magic_idx] - trail_interval_diff;
+      //トレイル開始
+      if(trail_sell_price[magic_idx] == 0.0 && price <= trail_start_price) {
+         trail_sell_price[magic_idx] = price + trail_interval_diff;
+      }
+      if(trail_sell_price[magic_idx] > 0) {
+         if(price >= trail_sell_price[magic_idx] && EASellProfits[magic_idx] > 0) {
+            CloseAllPositions(POSITION_TYPE_SELL, MAGIC[magic_idx]);
+            return;
+         }
+         if((trail_sell_price[magic_idx] - price) > trail_interval_diff) {
+            trail_sell_price[magic_idx] = price + trail_interval_diff;
+         }
+      }
+   }
 }
