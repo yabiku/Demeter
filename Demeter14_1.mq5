@@ -100,6 +100,8 @@ double weightAverageSell[MAGIC.Size()]; //MAGIC毎の加重平均価格(Sell))
 double EABuyProfits[MAGIC.Size()]; //MAGIC毎の損益(Buy)
 double EASellProfits[MAGIC.Size()]; //MAGIC毎の損益(Sell)
 
+double trailStart_buy_price[MAGIC.Size()]; //Trailing開始価格(Buy)
+double trailStart_sell_price[MAGIC.Size()];////Trailing開始価格(Sell)
 double trail_buy_price[MAGIC.Size()]; //Trailing価格(Buy)
 double trail_sell_price[MAGIC.Size()];////Trailing価格(Sell)
 
@@ -726,6 +728,8 @@ void FreeAll()
       weightAverageSell[i] = 0.0;
       EABuyProfits[i] = 0.0;
       EASellProfits[i] = 0.0;
+      trailStart_buy_price[i] = 0.0;
+      trailStart_sell_price[i] = 0.0;
       trail_buy_price[i] = 0.0;
       trail_sell_price[i] = 0.0;
    }
@@ -792,6 +796,7 @@ void CloseAllPositions(ENUM_POSITION_TYPE pos_type, long magic) {
       EABuyProfits[magic_idx] = 0.0;
       panel.setLblNanpin(POSITION_TYPE_BUY, 0, magic_idx);
       panel.setLblProfits(POSITION_TYPE_BUY, 0, magic_idx);
+      trailStart_buy_price[magic_idx] = 0.0;
       trail_buy_price[magic_idx] = 0.0;
    } else {
       HighestPriceTicketNo[magic_idx] = 0;
@@ -801,6 +806,7 @@ void CloseAllPositions(ENUM_POSITION_TYPE pos_type, long magic) {
       EASellProfits[magic_idx] = 0.0;
       panel.setLblNanpin(POSITION_TYPE_SELL, 0, magic_idx);
       panel.setLblProfits(POSITION_TYPE_SELL, 0, magic_idx);
+      trailStart_sell_price[magic_idx] = 0.0;
       trail_sell_price[magic_idx] = 0.0;
    }
    
@@ -981,8 +987,14 @@ void getWeightAverage() {
       rescueVolumesSell += volumesSell[i];
       rescuePriceVolumesSell += pricexvolumesSell[i];
 
-      if(volumesBuy[i] != 0.0) weightAverageBuy[i] = NormalizeDouble(pricexvolumesBuy[i]/volumesBuy[i], Digits());
-      if(volumesSell[i] != 0.0) weightAverageSell[i] = NormalizeDouble(pricexvolumesSell[i]/volumesSell[i], Digits());
+      if(volumesBuy[i] != 0.0) {
+         weightAverageBuy[i] = NormalizeDouble(pricexvolumesBuy[i]/volumesBuy[i], Digits());
+         trailStart_buy_price[i] = weightAverageBuy[i] + TrailStart*10*Point();
+      }
+      if(volumesSell[i] != 0.0) {
+         weightAverageSell[i] = NormalizeDouble(pricexvolumesSell[i]/volumesSell[i], Digits());
+         trailStart_sell_price[i] = weightAverageSell[i] - TrailStart*10*Point();
+      }
    }
    
    if(rescueVolumesBuy !=  0.0 ) weightAverageBuy[0] = NormalizeDouble(rescuePriceVolumesBuy/rescueVolumesBuy,Digits());
@@ -1157,14 +1169,11 @@ void getNanpinDiff() {
 }
 
 void TrailingStop(ENUM_POSITION_TYPE pos_type, double price, int magic_idx) {
-   double trail_start_price = 0.0;
    double trail_interval_diff = TrailInterval*10*Point();
 
    if(weightAverageBuy[magic_idx] > 0 && pos_type == POSITION_TYPE_BUY) {
-      //トレイル開始価格
-      trail_start_price = weightAverageBuy[magic_idx] + trail_interval_diff;
       //トレイル開始
-      if(trail_buy_price[magic_idx] == 0.0 && price >= trail_start_price) {
+      if(trail_buy_price[magic_idx] == 0.0 && price >= trailStart_buy_price[magic_idx]) {
          trail_buy_price[magic_idx] = price - trail_interval_diff;
       }
       if(trail_buy_price[magic_idx] > 0) {
@@ -1178,10 +1187,8 @@ void TrailingStop(ENUM_POSITION_TYPE pos_type, double price, int magic_idx) {
       }
    }
    if(weightAverageSell[magic_idx] > 0 && pos_type == POSITION_TYPE_SELL) {
-      //トレイル開始価格
-      trail_start_price = weightAverageSell[magic_idx] - trail_interval_diff;
       //トレイル開始
-      if(trail_sell_price[magic_idx] == 0.0 && price <= trail_start_price) {
+      if(trail_sell_price[magic_idx] == 0.0 && price <= trailStart_sell_price[magic_idx]) {
          trail_sell_price[magic_idx] = price + trail_interval_diff;
       }
       if(trail_sell_price[magic_idx] > 0) {
@@ -1194,4 +1201,28 @@ void TrailingStop(ENUM_POSITION_TYPE pos_type, double price, int magic_idx) {
          }
       }
    }
+}
+
+//チャート上に水平線を引く
+bool CreateHBLine(string lineName, double price, color clr, ENUM_LINE_STYLE style = STYLE_SOLID) {
+
+   if(!ObjectCreate(0, lineName, OBJ_HLINE, 0, 0, price)) {
+      Print(__FUNCTION__,
+          ": failed to create a horizontal line! Error code = ",GetLastError());
+   } else {
+      ObjectSetInteger(0, lineName, OBJPROP_COLOR, clr);
+      ObjectSetInteger(0, lineName, OBJPROP_STYLE, style);
+      return(true);
+   }
+   return(false);
+}
+
+//チャート上の水平線の移動
+bool MoveHBLine(string lineName, double price) {
+   if(!ObjectMove(0, lineName, 0, 0, price)) {
+      Print(__FUNCTION__,
+         ": failed to move the horizontal line! Error code = ",GetLastError());
+      return(false);
+   }
+   return(true);
 }
