@@ -104,6 +104,9 @@ double lotsSell[MAGIC.Size()]; //MAGIC毎のロット総数(Sell)
 double EABuyProfits[MAGIC.Size()]; //MAGIC毎の損益(Buy)
 double EASellProfits[MAGIC.Size()]; //MAGIC毎の損益(Sell)
 
+int BuyPositions[MAGIC.Size()]; //MAGIC毎のポジション数(Buy)
+int SellPositions[MAGIC.Size()]; //MAGIC毎のポジション数(Sell)
+
 double trailStart_buy_price[MAGIC.Size()]; //Trailing開始価格(Buy)
 double trailStart_sell_price[MAGIC.Size()];////Trailing開始価格(Sell)
 double trail_buy_price[MAGIC.Size()]; //Trailing価格(Buy)
@@ -502,19 +505,20 @@ void OnTick() {
    if(isEntry == 1) ObjectSetString(0, lblStatus, OBJPROP_TEXT, "スプレッド拡大");
    if(isEntry == 2) ObjectSetString(0, lblStatus, OBJPROP_TEXT, "NG時間帯");
    
-   //各EAの損益を計算
-   getEAProfits();
+   //各EAの情報を計算
+   //損益、ポジション数
+   getPositionInfo();
    
    //パネルのチェックボックス
    if(panel.getBuyCheckBox()) {
-      if(!HavePosition(POSITION_TYPE_BUY)) {
+      if(BuyPositions[0] == 0) {
          panel.setBuyCheckBox(false);
       } else {
          buyChkFlg = true;
       }
    }
    if(panel.getSellCheckBox()) {
-      if(!HavePosition(POSITION_TYPE_SELL)) {
+      if(SellPositions[0] == 0) {
          panel.setSellCheckBox(false);
       } else {
          sellChkFlg = true;
@@ -563,15 +567,28 @@ void OnTick() {
 
    for(int i=1; i<(int)MAGIC.Size(); i++) {
       //ナンピン処理
-      if(!buyChkFlg && LowestPriceTicketNo[i] > 0 && nextBuyNanpinPrice[i] >= ask && nextBuyNanpinTime[i] <= TimeCurrent()) {
-         trade.SetExpertMagicNumber(MAGIC[i]);
-         double lots = getLots(LowestPriceTicketNo[i], nanpin_lots_bairitsu);
-         if(!trade.Buy(lots)) printTradeError(trade);
+      if(!buyChkFlg && LowestPriceTicketNo[i] > 0 && nextBuyNanpinPrice[i] >= ask ) {
+         bool flg = (BuyPositions[i] <= NanpinMultiNumber);
+         if(!flg) {
+            flg = (nextBuyNanpinTime[i] <= TimeCurrent());
+         }
+         if(flg) {
+            trade.SetExpertMagicNumber(MAGIC[i]);
+            double lots = getLots(LowestPriceTicketNo[i], nanpin_lots_bairitsu);
+            if(!trade.Buy(lots)) printTradeError(trade);
+         }
       }
-      if(!sellChkFlg && HighestPriceTicketNo[i] > 0 && nextSellNanpinPrice[i] <= bid && nextSellNanpinTime[i] <= TimeCurrent()) {
-         trade.SetExpertMagicNumber(MAGIC[i]);
-         double lots = getLots(HighestPriceTicketNo[i], nanpin_lots_bairitsu);
-         if(!trade.Sell(lots)) printTradeError(trade);
+      
+      if(!sellChkFlg && HighestPriceTicketNo[i] > 0 && nextSellNanpinPrice[i] <= bid) {
+         bool flg = (SellPositions[i] <= NanpinMultiNumber);
+         if(!flg) {
+            flg = (nextSellNanpinTime[i] <= TimeCurrent());
+         }
+         if(flg) {
+            trade.SetExpertMagicNumber(MAGIC[i]);
+            double lots = getLots(HighestPriceTicketNo[i], nanpin_lots_bairitsu);
+            if(!trade.Sell(lots)) printTradeError(trade);
+         }
       }
 
       //利確処理
@@ -580,13 +597,13 @@ void OnTick() {
 
       //エントリー
       int sig_entry = EntrySignal(MAGIC[i]);
-      if(!buyChkFlg && sig_entry>0 && IsNoEntry(POSITION_TYPE_BUY)) {
+      if(!buyChkFlg && sig_entry>0 && BuyPositions[0] == 0) {
          trade.SetExpertMagicNumber(MAGIC[i]);
          if(!trade.Buy(NormalizeLot(Symbol(), EA_in_start_lots))) {
             printTradeError(trade);
          }
       }
-      if(!sellChkFlg && sig_entry<0 && IsNoEntry(POSITION_TYPE_SELL)) {
+      if(!sellChkFlg && sig_entry<0 && SellPositions[0] == 0) {
          trade.SetExpertMagicNumber(MAGIC[i]);
          if(!trade.Sell(NormalizeLot(Symbol(), EA_in_start_lots))) {
             printTradeError(trade);
@@ -845,6 +862,8 @@ void FreeAll()
       trail_buy_price[i] = 0.0;
       trail_sell_price[i] = 0.0;
       ObjectsDeleteAll(0, prefix[i], -1, OBJ_HLINE);
+      BuyPositions[i] = 0;
+      SellPositions[i] = 0;
    }
 }
 
@@ -914,6 +933,7 @@ void CloseAllPositions(ENUM_POSITION_TYPE pos_type, long magic) {
       trail_buy_price[magic_idx] = 0.0;
       ObjectsDeleteAll(0, prefix[magic_idx]+"_buy_start", -1, OBJ_HLINE);
       ObjectsDeleteAll(0, prefix[magic_idx]+"_buy_trail", -1, OBJ_HLINE);
+      BuyPositions[magic_idx] = 0;
    } else {
       HighestPriceTicketNo[magic_idx] = 0;
       nextSellNanpinPrice[magic_idx] = 0.0;
@@ -927,6 +947,7 @@ void CloseAllPositions(ENUM_POSITION_TYPE pos_type, long magic) {
       trail_sell_price[magic_idx] = 0.0;
       ObjectsDeleteAll(0, prefix[magic_idx]+"_sell_start", -1, OBJ_HLINE);
       ObjectsDeleteAll(0, prefix[magic_idx]+"_sell_trail", -1, OBJ_HLINE);
+      SellPositions[magic_idx] = 0;
    }
    
    if(pos_type == POSITION_TYPE_BUY) {
@@ -1175,48 +1196,33 @@ int EntrySignal(long magic) {
       CiBandsEA1.Refresh();
       // RSI < 30 && LowerBands > Bid() ならロング
       if( CiRsiEA1.Main(0) < 30 && CiBandsEA1.Lower(0) > Csymbol.Bid()) {
-         Print("EntrySignal=Long");
+         Print("EA1 EntrySignal=Long");
          return(1);
       }
       //  RSI > 70 && UpperBand < Bid() ならショート
       if(CiRsiEA1.Main(0) > 70 && CiBandsEA1.Upper(0) < Csymbol.Bid()) {
-         Print("EntrySignal=Short");
+         Print("EA1 EntrySignal=Short");
          return(-1);
       }
    }
    
-   if(magic == MAGIC[2]) {
-   }
    if(magic == MAGIC[3]) {
+   }
+   if(magic == MAGIC[4]) {
    }
    
    return(ret);
 }
 
-bool IsNoEntry(ENUM_POSITION_TYPE pos_type) {
-   //同じ方向にポジションがあればfalse
-   //ない場合は、true
-   ulong   keys[];
-   CPosInfo *values[];
-
-   int n = posMap.CopyTo(keys, values, 0);  // 全件コピーして列挙
-
-   for(int i=0; i<n; i++)
-   {
-      CPosInfo *p = values[i];
-      if(pos_type == p.pos_type) return(false);
-   }
-   
-   return(true);
-}
-
-void getEAProfits() {
+void getPositionInfo() {
    ulong   keys[];
    CPosInfo *values[];
 
    for(int i=0; i<(int)MAGIC.Size(); i++) {
       EABuyProfits[i] = 0.0;
       EASellProfits[i] = 0.0;
+      BuyPositions[i] = 0;
+      SellPositions[i] = 0;
    }
 
    int n = posMap.CopyTo(keys, values, 0);  // 全件コピーして列挙
@@ -1232,10 +1238,14 @@ void getEAProfits() {
          buy_profits = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
          EABuyProfits[magic_idx] += buy_profits;
          EABuyProfits[0] += buy_profits;
+         BuyPositions[magic_idx]++;
+         BuyPositions[0]++;
       } else {
          sell_profits = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
          EASellProfits[magic_idx] += sell_profits;
          EASellProfits[0] +=sell_profits;
+         SellPositions[magic_idx]++;
+         SellPositions[0]++;
       }
    }
 }
@@ -1380,21 +1390,6 @@ bool MoveHBLine(string lineName, double price) {
       return(false);
    }
    return(true);
-}
-
-bool HavePosition(ENUM_POSITION_TYPE buyorsell) {
-   ulong   keys[];
-   CPosInfo *values[];
-   int n = posMap.CopyTo(keys, values, 0);  // 全件コピーして列挙
-   if(n==0) return false;
-
-   for(int i=0; i<n; i++)
-   {
-      CPosInfo *p = values[i];
-      if(p.pos_type == buyorsell) return true;
-   }
-   
-   return false;
 }
 
 double getTakeProfitsPrice(ENUM_POSITION_TYPE pos_type) {
