@@ -68,11 +68,13 @@ input double toRescue = 10000; //レスキュー移行価格（円）
 input double RescueBuyTP = 2500; //レスキューモードBuy利確価格(0は利確しない)
 input double RescueSellTP = 2500; //レスキューモードSell利確価格(0は利確しない)
 
-input double TrailStart = 9.0; //トレール開始値
-input double TrailInterval = 4.0; //トレール幅
+input double TrailStart = 10.0; //トレール開始値
+input double TrailInterval = 5.0; //トレール幅
 input double SpreadFilter = 5.0; //スプレッドフィルター
-input double plusTP = 2.0; //プラ転決済
+input double plusTP = 3.0; //プラ転決済
 input int plusNanpin = 5; //プラ転決済ポジション
+input double nanpin_base_diff = 20; //ナンピン価格幅のベース
+input int nanpin_base_time = 5; //ナンピン時間差のベース(分)
 input double nanpin_lots_bairitsu = 1.5; //ナンピンロット倍率
 input double plusNanpin_lots_bairitsu = 1.2; //プラテン決済時のナンピンロット倍率
 
@@ -364,11 +366,27 @@ public:
       }
    }
    
+   string getLblProfits(ENUM_POSITION_TYPE buyorsell, int magic_idx) {
+      if(buyorsell == POSITION_TYPE_BUY) {
+         return lblBuyProfits[magic_idx].Text();
+      } else {
+         return lblSellProfits[magic_idx].Text();
+      }
+   }
+   
    void setLblNanpin(ENUM_POSITION_TYPE buyorsell, double nanpin_price, int magic_idx) {
       if(buyorsell == POSITION_TYPE_BUY) {
          lblBuyNanpin[magic_idx].Text((string)nanpin_price);
       } else {
          lblSellNanpin[magic_idx].Text((string)nanpin_price);
+      }
+   }
+   
+   string getLblNanpin(ENUM_POSITION_TYPE buyorsell, int magic_idx) {
+      if(buyorsell == POSITION_TYPE_BUY) {
+         return lblBuyNanpin[magic_idx].Text();
+      } else {
+         return lblSellNanpin[magic_idx].Text();
       }
    }
 };
@@ -442,48 +460,56 @@ void OnTick() {
    Csymbol.RefreshRates();
    double ask = Csymbol.Ask();
    double bid = Csymbol.Bid();
+   bool buyChkFlg = false;
+   bool sellChkFlg = false;
 
    int isEntry = IsEntryOK();
    if(isEntry == 0) ObjectSetString(0, lblStatus, OBJPROP_TEXT, "稼働中");
    if(isEntry == 1) ObjectSetString(0, lblStatus, OBJPROP_TEXT, "スプレッド拡大");
    if(isEntry == 2) ObjectSetString(0, lblStatus, OBJPROP_TEXT, "NG時間帯");
+   
+   //パネルのチェックボックス
+   if(panel.getBuyCheckBox()) {
+      if(!HavePosition(POSITION_TYPE_BUY)) {
+         panel.setBuyCheckBox(false);
+      } else {
+         buyChkFlg = true;
+      }
+   }
+   if(panel.getSellCheckBox()) {
+      if(!HavePosition(POSITION_TYPE_SELL)) {
+         panel.setSellCheckBox(false);
+      } else {
+         sellChkFlg = true;
+      }
+   }
 
    for(int i=1; i<(int)MAGIC.Size(); i++) {
       //ナンピン処理
-      if(LowestPriceTicketNo[i] > 0 && nextBuyNanpinPrice[i] >= ask && nextBuyNanpinTime[i] <= TimeCurrent()) {
+      if(!buyChkFlg && LowestPriceTicketNo[i] > 0 && nextBuyNanpinPrice[i] >= ask && nextBuyNanpinTime[i] <= TimeCurrent()) {
          trade.SetExpertMagicNumber(MAGIC[i]);
          double lots = getLots(LowestPriceTicketNo[i], nanpin_lots_bairitsu);
          if(!trade.Buy(lots)) printTradeError(trade);
       }
-      if(HighestPriceTicketNo[i] > 0 && nextSellNanpinPrice[i] <= bid && nextSellNanpinTime[i] <= TimeCurrent()) {
+      if(!sellChkFlg && HighestPriceTicketNo[i] > 0 && nextSellNanpinPrice[i] <= bid && nextSellNanpinTime[i] <= TimeCurrent()) {
          trade.SetExpertMagicNumber(MAGIC[i]);
          double lots = getLots(HighestPriceTicketNo[i], nanpin_lots_bairitsu);
          if(!trade.Sell(lots)) printTradeError(trade);
       }
 
       //利確処理
-      if(i==0 && panel.getBuyCheckBox()) {
-         //レスキューモード
-         if(weightAverageBuy[i] > 0.0 && (weightAverageBuy[i] + TrailStart*10*Point()) <= ask ) CloseAllPositions(POSITION_TYPE_BUY, MAGIC[i]);
-      } else {
-         if(i!=0) TrailingStop(POSITION_TYPE_BUY, bid, i);
-      }
-      if(i==0 && panel.getSellCheckBox()) {
-         //レスキューモード
-         if(weightAverageSell[i] > 0.0 && (weightAverageSell[i] - TrailStart*10*Point()) >= bid) CloseAllPositions(POSITION_TYPE_SELL, MAGIC[i]);
-      } else {
-         if(i!=0) TrailingStop(POSITION_TYPE_SELL, ask, i);
-      }
+      if(!buyChkFlg) TrailingStop(POSITION_TYPE_BUY, bid, i);      
+      if(!sellChkFlg) TrailingStop(POSITION_TYPE_SELL, ask, i);
 
       //エントリー
       int sig_entry = EntrySignal(MAGIC[i]);
-      if(!panel.getBuyCheckBox() && sig_entry>0 && IsNoEntry(POSITION_TYPE_BUY)) {
+      if(!buyChkFlg && sig_entry>0 && IsNoEntry(POSITION_TYPE_BUY)) {
          trade.SetExpertMagicNumber(MAGIC[i]);
          if(!trade.Buy(NormalizeLot(Symbol(), EA_in_start_lots))) {
             printTradeError(trade);
          }
       }
-      if(!panel.getSellCheckBox() && sig_entry<0 && IsNoEntry(POSITION_TYPE_SELL)) {
+      if(!sellChkFlg && sig_entry<0 && IsNoEntry(POSITION_TYPE_SELL)) {
          trade.SetExpertMagicNumber(MAGIC[i]);
          if(!trade.Sell(NormalizeLot(Symbol(), EA_in_start_lots))) {
             printTradeError(trade);
@@ -492,34 +518,44 @@ void OnTick() {
       
       //パネル表示
       getEAProfits();
-      if(panel.getBuyCheckBox()) {
-         panel.setLblProfits(POSITION_TYPE_BUY, 0, i);
-         panel.setLblNanpin(POSITION_TYPE_BUY, 0, i);
+      if(buyChkFlg) {
+         if(panel.getLblProfits(POSITION_TYPE_BUY, i) != "") panel.setLblProfits(POSITION_TYPE_BUY, 0, i);
+         if(panel.getLblNanpin(POSITION_TYPE_BUY, i) != "") panel.setLblNanpin(POSITION_TYPE_BUY, 0, i);
       } else {
          if(EABuyProfits[i] != 0.0) panel.setLblProfits(POSITION_TYPE_BUY,EABuyProfits[i], i);
+         if(nextBuyNanpinPrice[i] != 0.0) panel.setLblNanpin(POSITION_TYPE_BUY, nextBuyNanpinPrice[i], i);
       }
-      if(panel.getSellCheckBox()) {
-         panel.setLblProfits(POSITION_TYPE_SELL, 0, i);
-         panel.setLblNanpin(POSITION_TYPE_SELL, 0, i);
+      if(sellChkFlg) {
+         if(panel.getLblProfits(POSITION_TYPE_BUY, i) != "") panel.setLblProfits(POSITION_TYPE_SELL, 0, i);
+         if(panel.getLblNanpin(POSITION_TYPE_BUY, i) != "") panel.setLblNanpin(POSITION_TYPE_SELL, 0, i);
       } else {
          if(EASellProfits[i] != 0.0) panel.setLblProfits(POSITION_TYPE_SELL,EASellProfits[i], i);
+         if(nextSellNanpinPrice[i] != 0.0) panel.setLblNanpin(POSITION_TYPE_SELL, nextSellNanpinPrice[i], i);
       }
    }
    
-   if(panel.getBuyCheckBox()) {
+   if(buyChkFlg) {
       if(panel.getBuyCheckBoxText() == "OFF") panel.setBuyCheckBoxText("ON");
       if(EABuyProfits[0] != 0.0) panel.setLblProfits(POSITION_TYPE_BUY, EABuyProfits[0], 0);
+      
+      //Rescue modeの利確
+      if(EABuyProfits[0] >= RescueBuyTP) CloseAllPositions(POSITION_TYPE_BUY, MAGIC[0]);
+      
    } else {
       if(panel.getBuyCheckBoxText() == "ON") panel.setBuyCheckBoxText("OFF");
-      panel.setLblProfits(POSITION_TYPE_BUY, 0, 0);
+      if(panel.getLblProfits(POSITION_TYPE_BUY, 0) != "") panel.setLblProfits(POSITION_TYPE_BUY, 0, 0);
    }
    
-   if(panel.getSellCheckBox()) {
+   if(sellChkFlg) {
       if(panel.getSellCheckBoxText() == "OFF") panel.setSellCheckBoxText("ON");
       if(EASellProfits[0] != 0.0) panel.setLblProfits(POSITION_TYPE_SELL, EASellProfits[0], 0);
+      
+      //Rescue modeの利確
+      if(EASellProfits[0] >= RescueSellTP) CloseAllPositions(POSITION_TYPE_SELL, MAGIC[0]);
+      
    } else {
       if(panel.getSellCheckBoxText() == "ON") panel.setSellCheckBoxText("OFF");
-      panel.setLblProfits(POSITION_TYPE_SELL, 0, 0);
+      if(panel.getLblProfits(POSITION_TYPE_BUY, 0) != "") panel.setLblProfits(POSITION_TYPE_SELL, 0, 0);      
    }
    
    ChartRedraw(0);
@@ -609,10 +645,8 @@ int obj_count = 0;
 void OnTimer() {
    panel.setLblJPNTime(TimeToString(convertToJapanTime(account_company_name), TIME_DATE| TIME_SECONDS));
 
-   //オープンポジションが無くて、HashMapにデータが残っている場合はメモリ解放
-   ulong keys[];
-   CPosInfo *values[];
-   if(PositionsTotal() == 0 && posMap.CopyTo(keys, values, 0) > 0)
+   //オープンポジションが無い場合
+   if(PositionsTotal() == 0)
       FreeAll();
 
    //パネルを前面に
@@ -801,7 +835,6 @@ void CloseAllPositions(ENUM_POSITION_TYPE pos_type, long magic) {
       trail_buy_price[magic_idx] = 0.0;
       ObjectsDeleteAll(0, prefix[magic_idx]+"_buy_start", -1, OBJ_HLINE);
       ObjectsDeleteAll(0, prefix[magic_idx]+"_buy_trail", -1, OBJ_HLINE);
-
    } else {
       HighestPriceTicketNo[magic_idx] = 0;
       nextSellNanpinPrice[magic_idx] = 0.0;
@@ -1043,16 +1076,20 @@ int EntrySignal(long magic) {
    // 　　　　1 ロング
    //     -1 ショート
    int ret = 0;
+   //MAGIC[0]: Rescue
+   //MAGIC[1]: NonEA
+   //MAGIC[2]: EA1
+   //MAGIC[3]: EA2
+   //MAGIC[4]: EA3
    
    if(magic==MAGIC[0] || magic == MAGIC[1])  return(ret);
 
    Csymbol.Name(Symbol());
    Csymbol.RefreshRates();
 
-   if(magic == MAGIC[1]) {
+   if(magic == MAGIC[2]) {
       CiRsiEA1.Refresh();
       CiBandsEA1.Refresh();
-            
       // RSI < 30 && LowerBands > Bid() ならロング
       if( CiRsiEA1.Main(0) < 30 && CiBandsEA1.Lower(0) > Csymbol.Bid()) {
          Print("EntrySignal=Long");
@@ -1123,50 +1160,50 @@ void getNanpinDiff() {
    
    double nanpin_hosei = 1; //価格の補正
    if(StringFind(account_company_name, "OANDA") >=0) nanpin_hosei = 10.0; //OANDA証券の場合
-   nanpin_haba = 13*nanpin_hosei; //価格のナンピン差
+   nanpin_haba =nanpin_base_diff*nanpin_hosei; //価格のナンピン差
    
-   nanpin_late_time = 5; //時間のナンピン差
+   nanpin_late_time = nanpin_base_time; //時間のナンピン差
    
    if(mqlNow.hour >= 6 && mqlNow.hour < 16) { //東京時間
       if(n_type == offense) {
-         nanpin_haba = 10*nanpin_hosei;
-         nanpin_late_time = 5;
+         nanpin_haba = (nanpin_base_diff-2)*nanpin_hosei;
+         nanpin_late_time = nanpin_base_time;
       } else if(n_type == balance) {
-         nanpin_haba = 13*nanpin_hosei;
-         nanpin_late_time = 5;
+         nanpin_haba = (nanpin_base_diff-2)*nanpin_hosei;
+         nanpin_late_time = nanpin_base_time;
       } else if (n_type == defense) {
-         nanpin_haba = 15*nanpin_hosei;
-         nanpin_late_time = 5;
+         nanpin_haba = nanpin_base_diff*nanpin_hosei;
+         nanpin_late_time = nanpin_base_time;
       } else if (n_type == noninterval) {
-         nanpin_haba = 15*nanpin_hosei;
+         nanpin_haba = nanpin_base_diff*nanpin_hosei;
          nanpin_late_time = 0;
       }
    } else if(mqlNow.hour >= 16 && mqlNow.hour < 21) { //ロンドン時間
       if(n_type == offense) {
-         nanpin_haba = 13*nanpin_hosei;
-         nanpin_late_time = 5;
+         nanpin_haba = (nanpin_base_diff-2)*nanpin_hosei;
+         nanpin_late_time = nanpin_base_time;
       } else if(n_type == balance) {
-         nanpin_haba = 15*nanpin_hosei;
-         nanpin_late_time = 5;
+         nanpin_haba = nanpin_base_diff*nanpin_hosei;
+         nanpin_late_time = nanpin_base_time;
       } else if (n_type == defense) {
-         nanpin_haba = 18*nanpin_hosei;
-         nanpin_late_time = 5;
+         nanpin_haba = (nanpin_base_diff+3)*nanpin_hosei;
+         nanpin_late_time = nanpin_base_time;
       } else if (n_type == noninterval) {
-         nanpin_haba = 15*nanpin_hosei;
+         nanpin_haba = nanpin_base_diff*nanpin_hosei;
          nanpin_late_time = 0;
       }
    } else { //NY時間
       if(n_type == offense) {
-         nanpin_haba = 15*nanpin_hosei;
-         nanpin_late_time = 7;
+         nanpin_haba = nanpin_base_diff*nanpin_hosei;
+         nanpin_late_time = nanpin_base_time+2;
       } else if(n_type == balance) {
-         nanpin_haba = 18*nanpin_hosei;
-         nanpin_late_time = 8;
+         nanpin_haba = (nanpin_base_diff+3)*nanpin_hosei;
+         nanpin_late_time = nanpin_base_time+3;
       } else if (n_type == defense) {
-         nanpin_haba = 20*nanpin_hosei;
-         nanpin_late_time = 8;
+         nanpin_haba = (nanpin_base_diff+5)*nanpin_hosei;
+         nanpin_late_time = nanpin_base_time+3;
       } else if (n_type == noninterval) {
-         nanpin_haba = 15*nanpin_hosei;
+         nanpin_haba = nanpin_base_diff*nanpin_hosei;
          nanpin_late_time = 0;
       }
    }
@@ -1189,10 +1226,11 @@ void TrailingStop(ENUM_POSITION_TYPE pos_type, double price, int magic_idx) {
       if(trail_buy_price[magic_idx] > 0) {
          if(ObjectFind(0, prefix[magic_idx]+"_buy_start") >= 0) ObjectsDeleteAll(0, prefix[magic_idx]+"_buy_start", -1, OBJ_HLINE);
          if(ObjectFind(0, prefix[magic_idx]+"_buy_trail") < 0) {
-            CreateHBLine(prefix[magic_idx]+"_buy_trail", trail_buy_price[magic_idx], clr_buy[magic_idx], STYLE_DASHDOT);
+            CreateHBLine(prefix[magic_idx]+"_buy_trail", trail_buy_price[magic_idx], clr_buy[magic_idx], STYLE_DASHDOTDOT);
          } else {
             MoveHBLine(prefix[magic_idx]+"_buy_trail", trail_buy_price[magic_idx]);
          }
+         //利確
          if(price <= trail_buy_price[magic_idx] && EABuyProfits[magic_idx] > 0) {
             CloseAllPositions(POSITION_TYPE_BUY, MAGIC[magic_idx]);
             return;
@@ -1217,7 +1255,7 @@ void TrailingStop(ENUM_POSITION_TYPE pos_type, double price, int magic_idx) {
       if(trail_sell_price[magic_idx] > 0) {
          if(ObjectFind(0, prefix[magic_idx]+"_sell_start") >= 0) ObjectsDeleteAll(0, prefix[magic_idx]+"_sell_start", -1, OBJ_HLINE);
          if(ObjectFind(0, prefix[magic_idx]+"_sell_trail") < 0) {
-            CreateHBLine(prefix[magic_idx]+"_sell_trail", trail_sell_price[magic_idx], clr_sell[magic_idx], STYLE_DASHDOT);
+            CreateHBLine(prefix[magic_idx]+"_sell_trail", trail_sell_price[magic_idx], clr_sell[magic_idx], STYLE_DASHDOTDOT);
          } else {
             MoveHBLine(prefix[magic_idx]+"_sell_trail", trail_sell_price[magic_idx]);
          }
@@ -1256,3 +1294,37 @@ bool MoveHBLine(string lineName, double price) {
    }
    return(true);
 }
+
+bool HavePosition(ENUM_POSITION_TYPE buyorsell) {
+   ulong   keys[];
+   CPosInfo *values[];
+   int n = posMap.CopyTo(keys, values, 0);  // 全件コピーして列挙
+   if(n==0) return false;
+
+   for(int i=0; i<n; i++)
+   {
+      CPosInfo *p = values[i];
+      if(p.pos_type == buyorsell) return true;
+   }
+   
+   return false;
+}
+
+/*
+void CleanPosition() {
+   ulong   keys[];
+   CPosInfo *values[];
+   int n = posMap.CopyTo(keys, values, 0);  // 全件コピーして列挙
+   if(n==0) return;
+
+   for(int i=0; i<n; i++)
+   {
+      CPosInfo *p = values[i];
+      if(p.pos_type != pos_type) continue;
+      if(p.magic == magic || magic < 0) {
+         if(!trade.PositionClose(keys[i])) printTradeError(trade);
+         DeleteHashMap(keys[i]);
+      }
+   }
+}
+*/
