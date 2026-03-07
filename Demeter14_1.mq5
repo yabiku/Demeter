@@ -22,10 +22,11 @@
 #include <Object.mqh>
 #include <Generic/HashMap.mqh>
 
-long MAGIC[] = {-1, 0, 10, 20, 30}; //最初は-1とするRescueモード
-string prefix[] = {"Rescue", "NonEA", "EA1", "EA2", "EA3"};
-color clr_buy[] = {clrBlue, clrAqua, clrBlueViolet, clrDarkBlue, clrBlue};
-color clr_sell[] = {clrRed, clrPink, clrDarkOrange, clrDarkRed, clrRed};
+//MAGICの配列数を変えた時は、パネルを落としてからコンパイルしないとパネルがフリーズします。
+long MAGIC[] = {-1, 0, 10, 20}; //最初は-1とするRescueモード
+string prefix[] = {"Rescue", "NonEA", "EA1", "EA2"};
+color clr_buy[] = {clrBlue, clrAqua, clrBlueViolet, clrDarkBlue};
+color clr_sell[] = {clrRed, clrPink, clrDarkOrange, clrDarkRed};
 
 //現在のポジション情報を格納
 //--- 値（構造体の代わり：CObject継承クラス）
@@ -70,7 +71,7 @@ input double RescueSellTP = 500; //レスキューモードSell利確価格(0は
 
 input double TrailStart = 10.0; //トレール開始値
 input double TrailInterval = 4.0; //トレール幅
-input double SpreadFilter = 5.0; //スプレッドフィルター
+input double SpreadFilter = 4.0; //スプレッドフィルター
 input double plusTP = 3.0; //プラ転決済
 input int plusNanpin = 5; //プラ転決済ポジション
 input double nanpin_base_diff = 20; //ナンピン価格幅のベース
@@ -122,12 +123,20 @@ ENUM_TIMEFRAMES BandsTimeFrameEA1 = PERIOD_M1; //Long用のBBのタイムフレ�
 int RSIPeriodEA1 = 14; //Long用のRSIのPeriod
 int BandsPeriodEA1 = 20; //Long用のBBのPeriod
 double BandsSigmaEA1 = 2.0; //Long用のBBのシグマ
+CiADX CiADXEA1;
+ENUM_TIMEFRAMES ADXTimeFrameEA1 = PERIOD_M1;
+int ADXPeriodEA1 = 14;
 
-//For EA3
-CiRSI CiRsiEA3;
-input ENUM_TIMEFRAMES RSITimeFrameEA3 = PERIOD_M1; //EA3のRSIタイムフレーム
-input int RSIPeriodEA3 = 14; //EA3のRSIのPeriod
-input int LookBackEA3 = 200; //EA3の過去バー数の数
+//For EA2
+CiMA  CiMAEA2_200;
+CiMA  CiMAEA2_50;
+CiADX CiADXEA2;
+ENUM_TIMEFRAMES CiMAEA2_200_TimeFrame = PERIOD_M1;
+int CiMAEA2_200_Period = 200;
+ENUM_TIMEFRAMES CiMAEA2_50_TimeFrame = PERIOD_M1;
+int CiMAEA2_50_Period = 50;
+ENUM_TIMEFRAMES ADXTimeFrameEA2 = PERIOD_M1;
+int ADXPeriodEA2 = 14;
 
 class CMyPanel : public CAppDialog
 {
@@ -461,7 +470,17 @@ int OnInit()
       trail_buy_price[i] = 0.0;
       trail_sell_price[i] = 0.0;
    }
+
+   //For EA1
+   CiRsiEA1.Create(Symbol(), RSITimeFrameEA1, RSIPeriodEA1, PRICE_CLOSE);
+   CiBandsEA1.Create(Symbol(), BandsTimeFrameEA1, BandsPeriodEA1, 0, BandsSigmaEA1, PRICE_CLOSE);
+   CiADXEA1.Create(Symbol(), ADXTimeFrameEA1, ADXPeriodEA1);
    
+   //For EA2
+   CiMAEA2_200.Create(Symbol(), CiMAEA2_200_TimeFrame, CiMAEA2_200_Period, 0, MODE_EMA, PRICE_CLOSE);
+   CiMAEA2_50.Create(Symbol(), CiMAEA2_50_TimeFrame, CiMAEA2_50_Period, 0, MODE_EMA, PRICE_CLOSE);
+   CiADXEA2.Create(Symbol(), ADXTimeFrameEA2, ADXPeriodEA2);
+
    return INIT_SUCCEEDED;
 }
 
@@ -491,7 +510,6 @@ void OnDeinit(const int reason)
 // Main                                         +
 //-----------------------------------------------
 void OnTick() {
-  if(!AccountInfoInteger(ACCOUNT_TRADE_ALLOWED)) return; //取引NGの場合は抜ける
 
    Csymbol.Name(Symbol());
    Csymbol.RefreshRates();
@@ -568,11 +586,11 @@ void OnTick() {
    for(int i=1; i<(int)MAGIC.Size(); i++) {
       //ナンピン処理
       if(!buyChkFlg && LowestPriceTicketNo[i] > 0 && nextBuyNanpinPrice[i] >= ask ) {
-         bool flg = (BuyPositions[i] <= NanpinMultiNumber);
+         bool flg = (BuyPositions[i] < NanpinMultiNumber);
          if(!flg) {
             flg = (nextBuyNanpinTime[i] <= TimeCurrent());
          }
-         if(flg) {
+         if(flg && CanTradeNow(Symbol())) {
             trade.SetExpertMagicNumber(MAGIC[i]);
             double lots = getLots(LowestPriceTicketNo[i], nanpin_lots_bairitsu);
             if(!trade.Buy(lots)) printTradeError(trade);
@@ -580,11 +598,11 @@ void OnTick() {
       }
       
       if(!sellChkFlg && HighestPriceTicketNo[i] > 0 && nextSellNanpinPrice[i] <= bid) {
-         bool flg = (SellPositions[i] <= NanpinMultiNumber);
+         bool flg = (SellPositions[i] < NanpinMultiNumber);
          if(!flg) {
             flg = (nextSellNanpinTime[i] <= TimeCurrent());
          }
-         if(flg) {
+         if(flg && CanTradeNow(Symbol())) {
             trade.SetExpertMagicNumber(MAGIC[i]);
             double lots = getLots(HighestPriceTicketNo[i], nanpin_lots_bairitsu);
             if(!trade.Sell(lots)) printTradeError(trade);
@@ -592,22 +610,24 @@ void OnTick() {
       }
 
       //利確処理
-      if(!buyChkFlg) TrailingStop(POSITION_TYPE_BUY, bid, i);      
+      if(songiriMode && EABuyProfits[0] <= -songiri) {
+         CloseAllPositions(POSITION_TYPE_BUY, MAGIC[0]);
+      }
+      if(songiriMode && EASellProfits[0] <= -songiri) {
+         CloseAllPositions(POSITION_TYPE_SELL, MAGIC[0]);
+      }
+      if(!buyChkFlg) TrailingStop(POSITION_TYPE_BUY, bid, i);
       if(!sellChkFlg) TrailingStop(POSITION_TYPE_SELL, ask, i);
 
       //エントリー
       int sig_entry = EntrySignal(MAGIC[i]);
-      if(!buyChkFlg && sig_entry>0 && BuyPositions[0] == 0) {
+      if(!buyChkFlg && isEntry == 0 && sig_entry>0 && BuyPositions[0] == 0) {
          trade.SetExpertMagicNumber(MAGIC[i]);
-         if(!trade.Buy(NormalizeLot(Symbol(), EA_in_start_lots))) {
-            printTradeError(trade);
-         }
+         if(!trade.Buy(NormalizeLot(Symbol(), EA_in_start_lots))) printTradeError(trade);
       }
-      if(!sellChkFlg && sig_entry<0 && SellPositions[0] == 0) {
+      if(!sellChkFlg && isEntry == 0 && sig_entry<0 && SellPositions[0] == 0) {
          trade.SetExpertMagicNumber(MAGIC[i]);
-         if(!trade.Sell(NormalizeLot(Symbol(), EA_in_start_lots))) {
-            printTradeError(trade);
-         }
+         if(!trade.Sell(NormalizeLot(Symbol(), EA_in_start_lots))) printTradeError(trade);
       }
       
       //パネル表示
@@ -809,9 +829,14 @@ void OnTradeTransaction(const MqlTradeTransaction& trans,
    
    posMap.Add(pos_id, info);
    
-   nextNanpinPriceTime(info.pos_type, ArrayBsearch(MAGIC, magic));
+   int magic_idx = ArrayBsearch(MAGIC, magic);
+   nextNanpinPriceTime(info.pos_type, magic_idx);
+   if(info.pos_type == POSITION_TYPE_BUY) {
+      Print("next Buy[", magic, "] nanpin Time =", convertToJapanTime(account_company_name, nextBuyNanpinTime[magic_idx]));
+   } else {
+      Print("next Sell[", magic, "] nanpin Time =", convertToJapanTime(account_company_name, nextSellNanpinTime[magic_idx]));
+   }
    getWeightAverage();
-   
 }
 
 void DumpAll()
@@ -903,6 +928,8 @@ void getAllPositionInfo() {
 //ポジション一括クローズ
 void CloseAllPositions(ENUM_POSITION_TYPE pos_type, long magic) {
 
+   if(!CanTradeNow(Symbol())) return;
+
    ulong   keys[];
    CPosInfo *values[];
    int n = posMap.CopyTo(keys, values, 0);  // 全件コピーして列挙
@@ -914,8 +941,12 @@ void CloseAllPositions(ENUM_POSITION_TYPE pos_type, long magic) {
       CPosInfo *p = values[i];
       if(p.pos_type != pos_type) continue;
       if(p.magic == magic || magic < 0) {
-         if(!trade.PositionClose(keys[i])) printTradeError(trade);
-         DeleteHashMap(keys[i]);
+         bool closed = ClosePositionWithRetry(keys[i], 10, 300);
+         if(closed) {
+            DeleteHashMap(keys[i]);
+         } else {
+            PrintFormat("Close failed ticket=%I64u", keys[i]);
+         }
       }
    }
 
@@ -1042,6 +1073,7 @@ ulong getHighestPriceTicket(ENUM_POSITION_TYPE pos_type, long magic) {
 }
 
 void nextNanpinPriceTime(ENUM_POSITION_TYPE pos_type, int magic_idx) {
+   
    CPosInfo *p;
    
    getNanpinDiff();
@@ -1184,33 +1216,46 @@ int EntrySignal(long magic) {
    //MAGIC[1]: NonEA
    //MAGIC[2]: EA1
    //MAGIC[3]: EA2
-   //MAGIC[4]: EA3
    
    if(magic==MAGIC[0] || magic == MAGIC[1])  return(ret);
+   if(!CanTradeNow(Symbol())) return(ret);
 
    Csymbol.Name(Symbol());
    Csymbol.RefreshRates();
 
+   //For EA1
    if(magic == MAGIC[2]) {
       CiRsiEA1.Refresh();
       CiBandsEA1.Refresh();
+      CiADXEA1.Refresh();
       // RSI < 30 && LowerBands > Bid() ならロング
-      if( CiRsiEA1.Main(0) < 30 && CiBandsEA1.Lower(0) > Csymbol.Bid()) {
-         Print("EA1 EntrySignal=Long");
+      if( CiRsiEA1.Main(0) < 30 && iClose(Symbol(), PERIOD_M1, 1) < CiBandsEA1.Lower(1)
+         && iClose(Symbol(), PERIOD_M1, 0) > CiBandsEA1.Lower(0) && CiADXEA1.Main(0) < 25) {
+         Print("EA1 Buy Signal");
          return(1);
       }
       //  RSI > 70 && UpperBand < Bid() ならショート
-      if(CiRsiEA1.Main(0) > 70 && CiBandsEA1.Upper(0) < Csymbol.Bid()) {
-         Print("EA1 EntrySignal=Short");
+      if(CiRsiEA1.Main(0) > 70 && iClose(Symbol(), PERIOD_M1, 1) > CiBandsEA1.Upper(1) 
+         && iClose(Symbol(), PERIOD_M1, 0) < CiBandsEA1.Upper(0) && CiADXEA1.Main(0) < 25) {
+         Print("EA1 Sell Signal");
          return(-1);
       }
    }
-   
+   //For EA2
    if(magic == MAGIC[3]) {
+      CiMAEA2_200.Refresh();
+      CiMAEA2_50.Refresh();
+      CiADXEA2.Refresh();
+      if( CiADXEA2.Main(0) > 20 && CiMAEA2_50.Main(1) > CiMAEA2_200.Main(1) 
+         && iClose(Symbol(), PERIOD_M1, 1) > iHigh(Symbol(), PERIOD_M1, iHighest(Symbol(), PERIOD_M1, MODE_HIGH, 20, 2))) {
+         return(1);
+      }
+      if( CiADXEA2.Main(0) > 20 && CiMAEA2_50.Main(1) < CiMAEA2_200.Main(1)
+         && iClose(Symbol(), PERIOD_M1, 1) < iLow(Symbol(), PERIOD_M1, iLowest(Symbol(), PERIOD_M1, MODE_LOW, 20, 2))) {
+         return(-1);
+      }
    }
-   if(magic == MAGIC[4]) {
-   }
-   
+
    return(ret);
 }
 
@@ -1248,6 +1293,8 @@ void getPositionInfo() {
          SellPositions[0]++;
       }
    }
+//   Print("BuyProfits[0]=", EABuyProfits[0]);
+//   Print("SellProfits[0]=", EASellProfits[0]);
 }
 
 void getNanpinDiff() {
@@ -1411,4 +1458,86 @@ double getTakeProfitsPrice(ENUM_POSITION_TYPE pos_type) {
       if(plc != 0) tp_division = RescueSellTP/plc;
       return (weightAverageSell[0] - NormalizeDouble(tp_division, Digits()));
    }
+}
+
+bool CanTradeNow(const string symbol)
+{
+   if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)) return false;
+   if(!MQLInfoInteger(MQL_TRADE_ALLOWED))          return false;
+
+   long trade_mode = 0;
+   if(!SymbolInfoInteger(symbol, SYMBOL_TRADE_MODE, trade_mode)) return false;
+   if(trade_mode == SYMBOL_TRADE_MODE_DISABLED) return false;
+
+   // サーバ時刻で判定（テスターでもTimeTradeServer/TimeCurrentは動きます）
+   datetime t = TimeTradeServer();
+   if(t == 0) t = TimeCurrent();
+
+   MqlDateTime dt; TimeToStruct(t, dt);
+   if(dt.day_of_week == 0 || dt.day_of_week == 6) return false; // 日・土は基本NG（銘柄により例外あり）
+
+   // セッション判定（取引可能時間帯か）
+   datetime from = 0, to=0;
+   bool in_session = false;
+   for(int i=0; i<10; i++)
+   {
+      if(!SymbolInfoSessionTrade(symbol, (ENUM_DAY_OF_WEEK)dt.day_of_week, i, from, to))
+         break;
+      if(from == 0 && to == 0) continue;
+
+      // from/to は「当日0:00からの秒」基準の datetime として返るブローカーが多い
+      // TimeCurrentと同じ日に揃えて比較
+      datetime day0 = (datetime)(t - (dt.hour*3600 + dt.min*60 + dt.sec));
+      datetime s_from = day0 + (from % 86400);
+      datetime s_to   = day0 + (to   % 86400);
+
+      if(s_to < s_from) { // 日跨ぎ
+         if(t >= s_from || t <= s_to) in_session = true;
+      } else {
+         if(t >= s_from && t <= s_to) in_session = true;
+      }
+      if(in_session) break;
+   }
+   return in_session;
+}
+
+
+bool ClosePositionWithRetry(ulong ticket, int max_retry = 10, int sleep_ms = 300)
+{
+   for(int attempt = 0; attempt < max_retry; attempt++)
+   {
+      // すでに無ければ成功扱い
+      if(!PositionSelectByTicket(ticket))
+         return true;
+
+      if(trade.PositionClose(ticket))
+         return true;
+
+      uint retcode = trade.ResultRetcode();
+      string desc  = trade.ResultRetcodeDescription();
+
+      PrintFormat("Close retry %d failed. ticket=%I64u retcode=%u (%s)",
+                  attempt + 1, ticket, retcode, desc);
+
+      // 再試行不要なエラーは終了
+      if(!IsRetryableCloseError(retcode))
+         return false;
+
+      Sleep(sleep_ms);
+   }
+
+   // 最後にもう一度存在確認
+   if(!PositionSelectByTicket(ticket))
+      return true;
+
+   return false;
+}
+
+bool IsRetryableCloseError(uint retcode)
+{
+   return (retcode == TRADE_RETCODE_REQUOTE ||
+           retcode == TRADE_RETCODE_PRICE_CHANGED ||
+           retcode == TRADE_RETCODE_TIMEOUT ||
+           retcode == TRADE_RETCODE_CONNECTION ||
+           retcode == TRADE_RETCODE_TOO_MANY_REQUESTS);
 }
