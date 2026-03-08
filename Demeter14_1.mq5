@@ -132,15 +132,21 @@ ENUM_TIMEFRAMES ADXTimeFrameEA1 = PERIOD_M1;
 int ADXPeriodEA1 = 14;
 
 //For EA2
-CiMA  CiMAEA2_200;
+CiMA  CiMAEA2_20;
 CiMA  CiMAEA2_50;
+CiMA  CiMAEA2M1_20;
 CiADX CiADXEA2;
-ENUM_TIMEFRAMES CiMAEA2_200_TimeFrame = PERIOD_M1;
-int CiMAEA2_200_Period = 200;
-ENUM_TIMEFRAMES CiMAEA2_50_TimeFrame = PERIOD_M1;
+CiRSI CiRSIEA2;
+ENUM_TIMEFRAMES CiMAEA2_20_TimeFrame = PERIOD_M5;
+int CiMAEA2_20_Period = 20;
+ENUM_TIMEFRAMES CiMAEA2_50_TimeFrame = PERIOD_M5;
 int CiMAEA2_50_Period = 50;
-ENUM_TIMEFRAMES ADXTimeFrameEA2 = PERIOD_M1;
+ENUM_TIMEFRAMES ADXTimeFrameEA2 = PERIOD_M5;
 int ADXPeriodEA2 = 14;
+ENUM_TIMEFRAMES CiMAEA2M1_20_TimeFrame = PERIOD_M1;
+int CiMAEA2M1_20_Period = 20;
+ENUM_TIMEFRAMES RSIEA2_TimeFrame = PERIOD_M1;
+int RSIEA2_Period = 14;
 
 class CMyPanel : public CAppDialog
 {
@@ -483,9 +489,11 @@ int OnInit()
    CiADXEA1.Create(Symbol(), ADXTimeFrameEA1, ADXPeriodEA1);
    
    //For EA2
-   CiMAEA2_200.Create(Symbol(), CiMAEA2_200_TimeFrame, CiMAEA2_200_Period, 0, MODE_EMA, PRICE_CLOSE);
+   CiMAEA2_20.Create(Symbol(), CiMAEA2_20_TimeFrame, CiMAEA2_20_Period, 0, MODE_EMA, PRICE_CLOSE);
+   CiMAEA2M1_20.Create(Symbol(), CiMAEA2M1_20_TimeFrame, CiMAEA2M1_20_Period, 0, MODE_EMA, PRICE_CLOSE);
    CiMAEA2_50.Create(Symbol(), CiMAEA2_50_TimeFrame, CiMAEA2_50_Period, 0, MODE_EMA, PRICE_CLOSE);
    CiADXEA2.Create(Symbol(), ADXTimeFrameEA2, ADXPeriodEA2);
+   CiRSIEA2.Create(Symbol(), RSIEA2_TimeFrame, RSIEA2_Period, PRICE_CLOSE);
 
    return INIT_SUCCEEDED;
 }
@@ -1188,15 +1196,22 @@ int EntrySignal(long magic) {
    }
    //For EA2
    if(EA2 && magic == MAGIC[3]) {
-      CiMAEA2_200.Refresh();
+      CiMAEA2_20.Refresh();
+      CiMAEA2M1_20.Refresh();
       CiMAEA2_50.Refresh();
       CiADXEA2.Refresh();
-      if( CiADXEA2.Main(0) > 20 && CiMAEA2_50.Main(1) > CiMAEA2_200.Main(1) 
-         && iClose(Symbol(), PERIOD_M1, 1) > iHigh(Symbol(), PERIOD_M1, iHighest(Symbol(), PERIOD_M1, MODE_HIGH, 20, 2))) {
+      CiRSIEA2.Refresh();
+
+      // M5 EMA20 > EMA50 && ADX > 20 && M1 EMA20タッチ && RSI50      
+      if( CiADXEA2.Main(0) > 20 && CiMAEA2_20.Main(0) > CiMAEA2_50.Main(0) 
+         && iLow(Symbol(), PERIOD_M1, 1) < CiMAEA2M1_20.Main(1) && iClose(Symbol(), PERIOD_M1, 1) > CiMAEA2M1_20.Main(1)
+         && CiRSIEA2.Main(0) < 50 ) {
          return(1);
       }
-      if( CiADXEA2.Main(0) > 20 && CiMAEA2_50.Main(1) < CiMAEA2_200.Main(1)
-         && iClose(Symbol(), PERIOD_M1, 1) < iLow(Symbol(), PERIOD_M1, iLowest(Symbol(), PERIOD_M1, MODE_LOW, 20, 2))) {
+      // M5 EMA20 < EMA50 && ADX > 20 && M1 EMA20タッチ && RSI50
+      if( CiADXEA2.Main(0) > 20 && CiMAEA2_20.Main(0) < CiMAEA2_50.Main(0) 
+         && iHigh(Symbol(), PERIOD_M1, 1) > CiMAEA2M1_20.Main(1) && iClose(Symbol(), PERIOD_M1, 1) < CiMAEA2M1_20.Main(1)
+         && CiRSIEA2.Main(0) > 50 ) {
          return(-1);
       }
    }
