@@ -27,6 +27,8 @@ long MAGIC[] = {-1, 0, 10, 20}; //最初は-1とするRescueモード
 string prefix[] = {"Rescue", "NonEA", "EA1", "EA2"};
 color clr_buy[] = {clrBlue, clrAqua, clrBlueViolet, clrDarkBlue};
 color clr_sell[] = {clrRed, clrPink, clrDarkOrange, clrDarkRed};
+bool ForceCloseBuy[MAGIC.Size()];
+bool ForceCloseSell[MAGIC.Size()];
 
 //現在のポジション情報を格納
 //--- 値（構造体の代わり：CObject継承クラス）
@@ -438,6 +440,8 @@ int OnInit()
    
    getAllPositionInfo();
    getWeightAverage();
+   trade.SetDeviationInPoints(50);
+   trade.SetAsyncMode(false);
 
    //EAパラメータが変更されてても何もしない。
    if(UninitializeReason() == REASON_PARAMETERS) return(INIT_SUCCEEDED);
@@ -526,6 +530,9 @@ void OnTick() {
    //各EAの情報を計算
    //損益、ポジション数
    getPositionInfo();
+   
+   //クローズポジションがあればクローズする
+   ProcessForceClose();
    
    //パネルのチェックボックス
    if(panel.getBuyCheckBox()) {
@@ -870,25 +877,8 @@ void FreeAll()
    posMap.Clear();
    
    for(int i=0; i<(int)MAGIC.Size(); i++) {
-      nextBuyNanpinPrice[i] = 0.0;
-      nextSellNanpinPrice[i] = 0.0;
-      nextBuyNanpinTime[i] = TimeCurrent();
-      nextSellNanpinTime[i] = TimeCurrent();
-      LowestPriceTicketNo[i] = 0;
-      HighestPriceTicketNo[i] = 0;
-      weightAverageBuy[i] = 0.0;
-      weightAverageSell[i] = 0.0;
-      lotsBuy[i] = 0.0;
-      lotsSell[i] = 0.0;
-      EABuyProfits[i] = 0.0;
-      EASellProfits[i] = 0.0;
-      trailStart_buy_price[i] = 0.0;
-      trailStart_sell_price[i] = 0.0;
-      trail_buy_price[i] = 0.0;
-      trail_sell_price[i] = 0.0;
-      ObjectsDeleteAll(0, prefix[i], -1, OBJ_HLINE);
-      BuyPositions[i] = 0;
-      SellPositions[i] = 0;
+      ResetBuyState(i);
+      ResetSellState(i);
    }
 }
 
@@ -926,8 +916,31 @@ void getAllPositionInfo() {
 }
 
 //ポジション一括クローズ
+//マジック毎にクローズフラグをたてる
 void CloseAllPositions(ENUM_POSITION_TYPE pos_type, long magic) {
 
+   int magic_idx = ArrayBsearch(MAGIC, magic);
+   
+   if(magic_idx < 0) return;
+   
+   if(pos_type == POSITION_TYPE_BUY) {
+      if(magic < 0) {
+         for(int i=1; i<(int)MAGIC.Size(); i++) {
+            ForceCloseBuy[i] = true;
+         }
+      } else {
+         ForceCloseBuy[magic_idx] = true;
+      }
+   } else {
+      if(magic < 0) {
+         for(int i=1; i<(int)MAGIC.Size(); i++) {
+            ForceCloseSell[i] = true;
+         }
+      } else {
+         ForceCloseSell[magic_idx] = true;
+      }
+   }
+/*   
    if(!CanTradeNow(Symbol())) return;
 
    ulong   keys[];
@@ -994,6 +1007,7 @@ void CloseAllPositions(ENUM_POSITION_TYPE pos_type, long magic) {
    }
       
    double balance2 = AccountInfoDouble(ACCOUNT_BALANCE);
+*/
 }
 
 /** トレード関数がエラーになったときのエラー出力 */
@@ -1540,4 +1554,141 @@ bool IsRetryableCloseError(uint retcode)
            retcode == TRADE_RETCODE_TIMEOUT ||
            retcode == TRADE_RETCODE_CONNECTION ||
            retcode == TRADE_RETCODE_TOO_MANY_REQUESTS);
+}
+
+void ProcessForceClose()
+{
+   if(!CanTradeNow(Symbol())) return;
+
+   for(int m=0; m<(int)MAGIC.Size(); m++)
+   {
+      //クローズすべきMAIGC毎のポジションが無い場合
+      if(!ForceCloseBuy[m] && !ForceCloseSell[m])
+         continue;
+
+      for(int i=PositionsTotal()-1; i>=0; i--)
+      {
+         ulong ticket=PositionGetTicket(i);
+
+         if(!PositionSelectByTicket(ticket))
+            continue;
+
+         string sym=PositionGetString(POSITION_SYMBOL);
+         if(sym!=Symbol())
+            continue;
+
+         long magic=PositionGetInteger(POSITION_MAGIC);
+         if(magic!=MAGIC[m])
+            continue;
+
+         ENUM_POSITION_TYPE type=
+            (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+
+         if(type==POSITION_TYPE_BUY && !ForceCloseBuy[m])
+            continue;
+
+         if(type==POSITION_TYPE_SELL && !ForceCloseSell[m])
+            continue;
+
+         bool result = trade.PositionClose(ticket);
+
+         if(!result)
+         {
+            Print("Close retry ticket=",ticket,
+                  " ret=",trade.ResultRetcode(),
+                  " ",trade.ResultRetcodeDescription());
+         }
+      }
+
+      // 全部消えたか確認
+      bool exists=false;
+
+      for(int i=0;i<PositionsTotal();i++)
+      {
+         ulong ticket=PositionGetTicket(i);
+
+         if(!PositionSelectByTicket(ticket))
+            continue;
+
+         if(PositionGetString(POSITION_SYMBOL)!=Symbol())
+            continue;
+
+         if(PositionGetInteger(POSITION_MAGIC)!=MAGIC[m])
+            continue;
+
+         ENUM_POSITION_TYPE type=
+            (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+
+         if(type==POSITION_TYPE_BUY && ForceCloseBuy[m])
+            exists=true;
+
+         if(type==POSITION_TYPE_SELL && ForceCloseSell[m])
+            exists=true;
+      }
+
+      if(!exists)
+      {
+         if(ForceCloseBuy[m])
+         {
+            ResetBuyState(m);
+            ForceCloseBuy[m]=false;
+            if(m==0 && panel.getBuyCheckBox()) {
+               panel.setBuyCheckBox(false);
+               panel.setBuyCheckBoxText("OFF");
+            }
+         }
+
+         if(ForceCloseSell[m])
+         {
+            ResetSellState(m);
+            ForceCloseSell[m]=false;
+            if(m==0 && panel.getSellCheckBox()) {
+               panel.setSellCheckBox(false);
+               panel.setSellCheckBoxText("OFF");
+            }
+         }
+      }
+   }
+}
+
+void ResetBuyState(int magic_idx)
+{
+   LowestPriceTicketNo[magic_idx]=0;
+   nextBuyNanpinPrice[magic_idx]=0;
+   nextBuyNanpinTime[magic_idx]=TimeCurrent();
+   weightAverageBuy[magic_idx]=0;
+   lotsBuy[magic_idx]=0;
+   EABuyProfits[magic_idx]=0;
+
+   panel.setLblNanpin(POSITION_TYPE_BUY,0,magic_idx);
+   panel.setLblProfits(POSITION_TYPE_BUY,0,magic_idx);
+
+   trailStart_buy_price[magic_idx]=0;
+   trail_buy_price[magic_idx]=0;
+
+   ObjectsDeleteAll(0,prefix[magic_idx]+"_buy_start",-1,OBJ_HLINE);
+   ObjectsDeleteAll(0,prefix[magic_idx]+"_buy_trail",-1,OBJ_HLINE);
+
+   BuyPositions[magic_idx]=0;
+}
+
+void ResetSellState(int magic_idx)
+{
+   HighestPriceTicketNo[magic_idx]=0;
+   nextSellNanpinPrice[magic_idx]=0;
+   nextSellNanpinTime[magic_idx]=TimeCurrent();
+   weightAverageSell[magic_idx]=0;
+   lotsSell[magic_idx]=0;
+   EASellProfits[magic_idx]=0;
+
+   panel.setLblNanpin(POSITION_TYPE_SELL,0,magic_idx);
+   panel.setLblProfits(POSITION_TYPE_SELL,0,magic_idx);
+
+   trailStart_sell_price[magic_idx]=0;
+   trail_sell_price[magic_idx]=0;
+
+   ObjectsDeleteAll(0,prefix[magic_idx]+"_sell_start",-1,OBJ_HLINE);
+   ObjectsDeleteAll(0,prefix[magic_idx]+"_sell_trail",-1,OBJ_HLINE);
+
+   SellPositions[magic_idx]=0;
 }
