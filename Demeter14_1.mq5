@@ -27,6 +27,8 @@ long MAGIC[] = {-1, 0, 10, 20}; //最初は-1とするRescueモード
 string prefix[] = {"Rescue", "NonEA", "EA1", "EA2"};
 color clr_buy[] = {clrBlue, clrAqua, clrBlueViolet, clrDarkBlue};
 color clr_sell[] = {clrRed, clrPink, clrDarkOrange, clrDarkRed};
+input bool EA1 = true; //EA1の稼働フラグ
+input bool EA2 = true; //EA2の稼働フラグ
 bool ForceCloseBuy[MAGIC.Size()];
 bool ForceCloseSell[MAGIC.Size()];
 
@@ -940,74 +942,6 @@ void CloseAllPositions(ENUM_POSITION_TYPE pos_type, long magic) {
          ForceCloseSell[magic_idx] = true;
       }
    }
-/*   
-   if(!CanTradeNow(Symbol())) return;
-
-   ulong   keys[];
-   CPosInfo *values[];
-   int n = posMap.CopyTo(keys, values, 0);  // 全件コピーして列挙
-   if(n==0) return;
-
-   double balance1 = AccountInfoDouble(ACCOUNT_BALANCE);
-   for(int i=0; i<n; i++)
-   {
-      CPosInfo *p = values[i];
-      if(p.pos_type != pos_type) continue;
-      if(p.magic == magic || magic < 0) {
-         bool closed = ClosePositionWithRetry(keys[i], 10, 300);
-         if(closed) {
-            DeleteHashMap(keys[i]);
-         } else {
-            PrintFormat("Close failed ticket=%I64u", keys[i]);
-         }
-      }
-   }
-
-   int magic_idx = ArrayBsearch(MAGIC, magic);
-   if(pos_type == POSITION_TYPE_BUY) {
-      LowestPriceTicketNo[magic_idx] = 0;
-      nextBuyNanpinPrice[magic_idx] = 0.0;
-      nextBuyNanpinTime[magic_idx] = TimeCurrent();
-      weightAverageBuy[magic_idx] = 0.0;
-      lotsBuy[magic_idx] = 0.0;
-      EABuyProfits[magic_idx] = 0.0;
-      panel.setLblNanpin(POSITION_TYPE_BUY, 0, magic_idx);
-      panel.setLblProfits(POSITION_TYPE_BUY, 0, magic_idx);
-      trailStart_buy_price[magic_idx] = 0.0;
-      trail_buy_price[magic_idx] = 0.0;
-      ObjectsDeleteAll(0, prefix[magic_idx]+"_buy_start", -1, OBJ_HLINE);
-      ObjectsDeleteAll(0, prefix[magic_idx]+"_buy_trail", -1, OBJ_HLINE);
-      BuyPositions[magic_idx] = 0;
-   } else {
-      HighestPriceTicketNo[magic_idx] = 0;
-      nextSellNanpinPrice[magic_idx] = 0.0;
-      nextSellNanpinTime[magic_idx] = TimeCurrent();
-      weightAverageSell[magic_idx] = 0.0;
-      lotsSell[magic_idx] = 0.0;
-      EASellProfits[magic_idx] = 0.0;
-      panel.setLblNanpin(POSITION_TYPE_SELL, 0, magic_idx);
-      panel.setLblProfits(POSITION_TYPE_SELL, 0, magic_idx);
-      trailStart_sell_price[magic_idx] = 0.0;
-      trail_sell_price[magic_idx] = 0.0;
-      ObjectsDeleteAll(0, prefix[magic_idx]+"_sell_start", -1, OBJ_HLINE);
-      ObjectsDeleteAll(0, prefix[magic_idx]+"_sell_trail", -1, OBJ_HLINE);
-      SellPositions[magic_idx] = 0;
-   }
-   
-   if(pos_type == POSITION_TYPE_BUY) {
-      if(panel.getBuyCheckBox()) {
-         panel.setBuyCheckBox(false);
-         panel.setBuyCheckBoxText("OFF");
-      }
-   } else {
-      if(panel.getSellCheckBox()) {
-         panel.setSellCheckBox(false);
-         panel.setSellCheckBoxText("OFF");
-      }
-   }
-      
-   double balance2 = AccountInfoDouble(ACCOUNT_BALANCE);
-*/
 }
 
 /** トレード関数がエラーになったときのエラー出力 */
@@ -1035,7 +969,6 @@ double NormalizeLot(const string symbol_name, double order_lots) {
    }
    return(ln<ml ?ml : ln>mx ?mx : ln);
 }
-
 
 ulong getLowestPriceTicket(ENUM_POSITION_TYPE pos_type, long magic) {
    //オープンポジションのpos_typeで指定されたポジションのオープンプライス最安値のticketを返す。
@@ -1238,25 +1171,23 @@ int EntrySignal(long magic) {
    Csymbol.RefreshRates();
 
    //For EA1
-   if(magic == MAGIC[2]) {
+   if(EA1 && magic == MAGIC[2]) {
       CiRsiEA1.Refresh();
       CiBandsEA1.Refresh();
       CiADXEA1.Refresh();
       // RSI < 30 && LowerBands > Bid() ならロング
-      if( CiRsiEA1.Main(0) < 30 && iClose(Symbol(), PERIOD_M1, 1) < CiBandsEA1.Lower(1)
-         && iClose(Symbol(), PERIOD_M1, 0) > CiBandsEA1.Lower(0) && CiADXEA1.Main(0) < 25) {
+      if( CiRsiEA1.Main(0) < 30 && iClose(Symbol(), PERIOD_M1, 0) < CiBandsEA1.Lower(0) ) {
          Print("EA1 Buy Signal");
          return(1);
       }
       //  RSI > 70 && UpperBand < Bid() ならショート
-      if(CiRsiEA1.Main(0) > 70 && iClose(Symbol(), PERIOD_M1, 1) > CiBandsEA1.Upper(1) 
-         && iClose(Symbol(), PERIOD_M1, 0) < CiBandsEA1.Upper(0) && CiADXEA1.Main(0) < 25) {
+      if(CiRsiEA1.Main(0) > 70 && iClose(Symbol(), PERIOD_M1, 0) > CiBandsEA1.Upper(0)) {
          Print("EA1 Sell Signal");
          return(-1);
       }
    }
    //For EA2
-   if(magic == MAGIC[3]) {
+   if(EA2 && magic == MAGIC[3]) {
       CiMAEA2_200.Refresh();
       CiMAEA2_50.Refresh();
       CiADXEA2.Refresh();
@@ -1515,47 +1446,6 @@ bool CanTradeNow(const string symbol)
    return in_session;
 }
 
-
-bool ClosePositionWithRetry(ulong ticket, int max_retry = 10, int sleep_ms = 300)
-{
-   for(int attempt = 0; attempt < max_retry; attempt++)
-   {
-      // すでに無ければ成功扱い
-      if(!PositionSelectByTicket(ticket))
-         return true;
-
-      if(trade.PositionClose(ticket))
-         return true;
-
-      uint retcode = trade.ResultRetcode();
-      string desc  = trade.ResultRetcodeDescription();
-
-      PrintFormat("Close retry %d failed. ticket=%I64u retcode=%u (%s)",
-                  attempt + 1, ticket, retcode, desc);
-
-      // 再試行不要なエラーは終了
-      if(!IsRetryableCloseError(retcode))
-         return false;
-
-      Sleep(sleep_ms);
-   }
-
-   // 最後にもう一度存在確認
-   if(!PositionSelectByTicket(ticket))
-      return true;
-
-   return false;
-}
-
-bool IsRetryableCloseError(uint retcode)
-{
-   return (retcode == TRADE_RETCODE_REQUOTE ||
-           retcode == TRADE_RETCODE_PRICE_CHANGED ||
-           retcode == TRADE_RETCODE_TIMEOUT ||
-           retcode == TRADE_RETCODE_CONNECTION ||
-           retcode == TRADE_RETCODE_TOO_MANY_REQUESTS);
-}
-
 void ProcessForceClose()
 {
    if(!CanTradeNow(Symbol())) return;
@@ -1653,6 +1543,14 @@ void ProcessForceClose()
 
 void ResetBuyState(int magic_idx)
 {
+   ulong   keys[];
+   CPosInfo *values[];
+   int n = posMap.CopyTo(keys, values, 0);  // 全件コピーして列挙
+
+   for(int i=0; i<n; i++) {
+      CPosInfo *p = values[i];
+      if(p.pos_type == POSITION_TYPE_BUY && p.magic == MAGIC[magic_idx]) DeleteHashMap(keys[i]);
+   }
    LowestPriceTicketNo[magic_idx]=0;
    nextBuyNanpinPrice[magic_idx]=0;
    nextBuyNanpinTime[magic_idx]=TimeCurrent();
@@ -1674,6 +1572,15 @@ void ResetBuyState(int magic_idx)
 
 void ResetSellState(int magic_idx)
 {
+   ulong   keys[];
+   CPosInfo *values[];
+   int n = posMap.CopyTo(keys, values, 0);  // 全件コピーして列挙
+
+   for(int i=0; i<n; i++) {
+      CPosInfo *p = values[i];
+      if(p.pos_type == POSITION_TYPE_SELL && p.magic == MAGIC[magic_idx]) DeleteHashMap(keys[i]);
+   }
+
    HighestPriceTicketNo[magic_idx]=0;
    nextSellNanpinPrice[magic_idx]=0;
    nextSellNanpinTime[magic_idx]=TimeCurrent();
