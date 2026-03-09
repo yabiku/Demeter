@@ -132,6 +132,10 @@ ENUM_TIMEFRAMES ADXTimeFrameEA1 = PERIOD_M1;
 int ADXPeriodEA1 = 14;
 
 //For EA2
+CiMA CiMAEA2_200; //SMA200 Close
+ENUM_TIMEFRAMES MATimeFrameEA2 = PERIOD_M1;
+CiMA CiMAEA2Low_55; //EMA55 Low
+CiMA CiMAEA2High_55; //EMA55 High
 
 class CMyPanel : public CAppDialog
 {
@@ -474,6 +478,9 @@ int OnInit()
    CiADXEA1.Create(Symbol(), ADXTimeFrameEA1, ADXPeriodEA1);
    
    //For EA2
+   CiMAEA2_200.Create(Symbol(), MATimeFrameEA2, 200, 0, MODE_SMA, PRICE_CLOSE);
+   CiMAEA2Low_55.Create(Symbol(), MATimeFrameEA2, 55, 0, MODE_EMA, PRICE_LOW);
+   CiMAEA2High_55.Create(Symbol(), MATimeFrameEA2, 55, 0, MODE_EMA, PRICE_HIGH);
 
    return INIT_SUCCEEDED;
 }
@@ -1164,43 +1171,45 @@ int EntrySignal(long magic) {
       CiBandsEA1.Refresh();
       CiADXEA1.Refresh();
       // RSI < 30 && LowerBands > Bid() ならロング
-      if( CiRsiEA1.Main(0) < 30 && iClose(Symbol(), PERIOD_M1, 0) < CiBandsEA1.Lower(0) ) {
+      if( CiRsiEA1.Main(1) < 30 && iClose(Symbol(), PERIOD_M1, 1) < CiBandsEA1.Lower(1)
+         && CiADXEA1.Main(1) < 30
+         ) {
          Print("EA1 Buy Signal");
          return(1);
       }
       //  RSI > 70 && UpperBand < Bid() ならショート
-      if(CiRsiEA1.Main(0) > 70 && iClose(Symbol(), PERIOD_M1, 0) > CiBandsEA1.Upper(0)) {
+      if(CiRsiEA1.Main(1) > 70 && iClose(Symbol(), PERIOD_M1, 1) > CiBandsEA1.Upper(1)
+         && CiADXEA1.Main(1) < 30
+         ) {
          Print("EA1 Sell Signal");
          return(-1);
       }
    }
    //For EA2
    if(EA2 && magic == MAGIC[3]) {
-
-      MqlRates r[];
-      ArraySetAsSeries(r, true);
-   
-      if(CopyRates(_Symbol, TF_ENTRY, 0, 2, r) < 2)
-         return ret;
-   
-      // 新バー判定
-      if(r[0].time == g_lastBarTime)
-         return ret;
-   
-      g_lastBarTime = r[0].time;
-   
-      if(IsBuySignal_VWAPTouch())
-      {
-         return(1);
-//         Print("BUY signal: HigherTF trend UP + M1 VWAP touch");
-         // ここで買い注文
+      CiMAEA2_200.Refresh();
+      CiMAEA2Low_55.Refresh();
+      CiMAEA2High_55.Refresh();
+      
+      // Bid(1) > SMA200 && Bid(1)(Low) <= EMA55_LOW(1) && エンガルフ(陽線包み込み)
+      if(iClose(Symbol(), PERIOD_M1, 1) > CiMAEA2_200.Main(1) && iLow(Symbol(), PERIOD_M1, 1) <= CiMAEA2Low_55.Main(1)
+         && iClose(Symbol(), PERIOD_M1, 2) < iOpen(Symbol(), PERIOD_M1, 2) //2個前が陰線
+         && iClose(Symbol(), PERIOD_M1, 1) > iOpen(Symbol(), PERIOD_M1, 1) //1個前が陽線
+         && iClose(Symbol(), PERIOD_M1, 1) > iOpen(Symbol(), PERIOD_M1, 2) //包み足
+         && iOpen(Symbol(), PERIOD_M1, 1) < iClose(Symbol(), PERIOD_M1, 2)
+         && iHigh(Symbol(), PERIOD_M1, 1) > iHigh(Symbol(), PERIOD_M1, 2) //高値更新
+         ) {
+         return(1);   
       }
-   
-      if(IsSellSignal_VWAPTouch())
-      {
-         return(-1);
-//         Print("SELL signal: HigherTF trend DOWN + M1 VWAP touch");
-         // ここで売り注文
+      // Bid(1) < SMA200 && Bid(1)(High) >= EMA55_High(1) && エンガルフ(陰線包み込み)
+      if(iClose(Symbol(), PERIOD_M1, 1) < CiMAEA2_200.Main(1) && iHigh(Symbol(), PERIOD_M1, 1) >= CiMAEA2High_55.Main(1)
+         && iClose(Symbol(), PERIOD_M1, 2) > iOpen(Symbol(), PERIOD_M1, 2) //2個前が陽線
+         && iClose(Symbol(), PERIOD_M1, 1) < iOpen(Symbol(), PERIOD_M1, 1) //1個前が陰線
+         && iClose(Symbol(), PERIOD_M1, 1) < iOpen(Symbol(), PERIOD_M1, 2) //包み足
+         && iOpen(Symbol(), PERIOD_M1, 1) > iClose(Symbol(), PERIOD_M1, 2)
+         && iLow(Symbol(), PERIOD_M1, 1) < iLow(Symbol(), PERIOD_M1, 2) //底値更新
+         ) {
+         return(-1);   
       }
 
    }
@@ -1602,177 +1611,4 @@ void ResetSellState(int magic_idx)
    ObjectsDeleteAll(0,prefix[magic_idx]+"_sell_trail",-1,OBJ_HLINE);
 
    SellPositions[magic_idx]=0;
-}
-
-//+------------------------------------------------------------------+
-//| Higher TF Trend + M1 VWAP Touch Signal                           |
-//+------------------------------------------------------------------+
-
-input ENUM_TIMEFRAMES TF_TREND = PERIOD_M5;   // 上位足
-input ENUM_TIMEFRAMES TF_ENTRY = PERIOD_M1;   // エントリー足
-
-input int VWAP_PERIOD_TREND = 100;            // 上位足VWAP計算本数
-input int VWAP_PERIOD_ENTRY = 50;             // M1 VWAP計算本数
-
-input int TOUCH_TOLERANCE_POINTS = 30;        // VWAPタッチ許容幅
-input bool USE_CANDLE_CONFIRM = true;         // 陽線/陰線確認を使うか
-input bool USE_DOUBLE_TREND_CONFIRM = true;   // 上位足2本連続で方向確認するか
-
-datetime g_lastBarTime = 0;
-
-//+------------------------------------------------------------------+
-//| VWAP計算                                                         |
-//| period本分のVWAPを shift 位置から計算                            |
-//+------------------------------------------------------------------+
-double GetVWAP(int period, int shift, ENUM_TIMEFRAMES tf)
-{
-   if(period <= 0) return 0.0;
-
-   MqlRates rates[];
-   ArraySetAsSeries(rates, true);
-
-   int need_bars = period + shift;
-   if(CopyRates(_Symbol, tf, 0, need_bars + 5, rates) < need_bars)
-      return 0.0;
-
-   double pv_sum  = 0.0;
-   double vol_sum = 0.0;
-
-   for(int i = shift; i < shift + period; i++)
-   {
-      double typical_price = (rates[i].high + rates[i].low + rates[i].close) / 3.0;
-      double volume        = (double)rates[i].tick_volume; // FXなのでtick_volumeを使用
-
-      pv_sum  += typical_price * volume;
-      vol_sum += volume;
-   }
-
-   if(vol_sum <= 0.0)
-      return 0.0;
-
-   return pv_sum / vol_sum;
-}
-
-//+------------------------------------------------------------------+
-//| 上位足 上昇トレンド判定                                          |
-//+------------------------------------------------------------------+
-bool IsHigherTFBullTrend()
-{
-   MqlRates rt[];
-   ArraySetAsSeries(rt, true);
-
-   if(CopyRates(_Symbol, TF_TREND, 0, 3, rt) < 3)
-      return false;
-
-   double vwap1 = GetVWAP(VWAP_PERIOD_TREND, 1, TF_TREND);
-   if(vwap1 <= 0.0) return false;
-
-   bool cond1 = (rt[1].close > vwap1);
-
-   if(!USE_DOUBLE_TREND_CONFIRM)
-      return cond1;
-
-   double vwap2 = GetVWAP(VWAP_PERIOD_TREND, 2, TF_TREND);
-   if(vwap2 <= 0.0) return false;
-
-   bool cond2 = (rt[2].close > vwap2);
-
-   return (cond1 && cond2);
-}
-
-//+------------------------------------------------------------------+
-//| 上位足 下降トレンド判定                                          |
-//+------------------------------------------------------------------+
-bool IsHigherTFBearTrend()
-{
-   MqlRates rt[];
-   ArraySetAsSeries(rt, true);
-
-   if(CopyRates(_Symbol, TF_TREND, 0, 3, rt) < 3)
-      return false;
-
-   double vwap1 = GetVWAP(VWAP_PERIOD_TREND, 1, TF_TREND);
-   if(vwap1 <= 0.0) return false;
-
-   bool cond1 = (rt[1].close < vwap1);
-
-   if(!USE_DOUBLE_TREND_CONFIRM)
-      return cond1;
-
-   double vwap2 = GetVWAP(VWAP_PERIOD_TREND, 2, TF_TREND);
-   if(vwap2 <= 0.0) return false;
-
-   bool cond2 = (rt[2].close < vwap2);
-
-   return (cond1 && cond2);
-}
-
-//+------------------------------------------------------------------+
-//| M1 VWAPタッチ買いシグナル                                        |
-//+------------------------------------------------------------------+
-bool IsBuySignal_VWAPTouch()
-{
-   if(!IsHigherTFBullTrend())
-      return false;
-
-   MqlRates re[];
-   ArraySetAsSeries(re, true);
-
-   if(CopyRates(_Symbol, TF_ENTRY, 0, 3, re) < 3)
-      return false;
-
-   double vwap1 = GetVWAP(VWAP_PERIOD_ENTRY, 1, TF_ENTRY);
-   if(vwap1 <= 0.0) return false;
-
-   double tol = TOUCH_TOLERANCE_POINTS * _Point;
-
-   // M1確定足がVWAPにタッチして反発
-   bool touched   = (re[1].low <= vwap1 + tol);
-   bool closedUp  = (re[1].close > vwap1);
-   bool bullish   = (re[1].close > re[1].open);
-
-   // 前の足はVWAP上にいた方が「押し目」っぽい
-   double vwap2 = GetVWAP(VWAP_PERIOD_ENTRY, 2, TF_ENTRY);
-   if(vwap2 <= 0.0) return false;
-   bool wasAboveBefore = (re[2].close >= vwap2);
-
-   if(USE_CANDLE_CONFIRM)
-      return (touched && closedUp && bullish && wasAboveBefore);
-   else
-      return (touched && closedUp && wasAboveBefore);
-}
-
-//+------------------------------------------------------------------+
-//| M1 VWAPタッチ売りシグナル                                        |
-//+------------------------------------------------------------------+
-bool IsSellSignal_VWAPTouch()
-{
-   if(!IsHigherTFBearTrend())
-      return false;
-
-   MqlRates re[];
-   ArraySetAsSeries(re, true);
-
-   if(CopyRates(_Symbol, TF_ENTRY, 0, 3, re) < 3)
-      return false;
-
-   double vwap1 = GetVWAP(VWAP_PERIOD_ENTRY, 1, TF_ENTRY);
-   if(vwap1 <= 0.0) return false;
-
-   double tol = TOUCH_TOLERANCE_POINTS * _Point;
-
-   // M1確定足がVWAPにタッチして反落
-   bool touched   = (re[1].high >= vwap1 - tol);
-   bool closedDn  = (re[1].close < vwap1);
-   bool bearish   = (re[1].close < re[1].open);
-
-   // 前の足はVWAP下にいた方が「戻り」っぽい
-   double vwap2 = GetVWAP(VWAP_PERIOD_ENTRY, 2, TF_ENTRY);
-   if(vwap2 <= 0.0) return false;
-   bool wasBelowBefore = (re[2].close <= vwap2);
-
-   if(USE_CANDLE_CONFIRM)
-      return (touched && closedDn && bearish && wasBelowBefore);
-   else
-      return (touched && closedDn && wasBelowBefore);
 }
