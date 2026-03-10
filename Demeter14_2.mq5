@@ -546,10 +546,8 @@ void OnTick() {
          ObjectsDeleteAll(0, prefix[i]+"_buy", -1, OBJ_HLINE);
       }
       if(ObjectFind(0, prefix[0]+"_buy_even") < 0) {
-      Print("hoge1 =", BuyAvgPrice[0]);
          //損益分岐ラインがない場合
          CreateHBLine(prefix[0]+"_buy_even", BuyAvgPrice[0], clr_buy[0], STYLE_DASHDOT);
-      Print("hoge2");
       } else {
          //損益分岐点が異なる場合
          if(ObjectGetDouble(0, prefix[0]+"_buy_even",OBJPROP_PRICE) != BuyAvgPrice[0]) MoveHBLine(prefix[0] + "_buy_even", BuyAvgPrice[0]);
