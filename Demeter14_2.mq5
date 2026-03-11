@@ -91,13 +91,13 @@ input bool EA_auto_lots = true; //EAエントリーロットの自動計算のON
 input double EA_in_start_lots = 0.01; //EA最初のロット数
 input bool SendNotificationFlg = false; //MT5含み損通知ON(true)
 input bool SendNotificationTPFlg = false; //MT5利確通知ON(true)
-input bool RescueSendNotification = false; //レスキューモードの通知ON(true)
+input bool RescueSendNotification = true; //レスキューモードの通知ON(true)
 input int NanpinMultiNumber = 1; //指定されたナンピン数までノンインターバルにする
 input int max_nanpin = 18; //ナンピン数の最大
 input NanpinType n_type = defense; //ナンピンタイプ
 input bool songiriMode = true; //損切モード（指定された金額で損切）
 input double songiri = 30000; //損切金額
-input double toRescue = 10000; //レスキュー移行価格（円）
+input double toRescue = 8000; //レスキュー移行価格（円）
 input double RescueBuyTP = 2000; //レスキューモードBuy利確価格(0は利確しない)
 input double RescueSellTP = 2000; //レスキューモードSell利確価格(0は利確しない)
 
@@ -420,6 +420,7 @@ int OnInit()
    trade.SetDeviationInPoints(50);
    trade.SetAsyncMode(false);
    ChartSetInteger(0, CHART_FOREGROUND, false);
+   g_positions_cache_dirty = true;
 
    //USDJPYの名前   
    if(StringFind(account_company_name, "GT") >=0 && contract_size == 1.0) {
@@ -648,6 +649,18 @@ void OnTick() {
          CloseAllPositions(POSITION_TYPE_SELL, MAGIC[0]);
       }
       
+      //Rescueモード
+      if(RescueSendNotification &&  !panel.getBuyCheckBox() && BuyProfit[0] <= - toRescue) {
+         panel.setBuyCheckBox(true);
+         buyChkFlg = true;
+         MT5SendMessage("Long: Rescue Mode Starting.");
+      }
+      if(RescueSendNotification &&  !panel.getSellCheckBox() && SellProfit[0] <= - toRescue) {
+         panel.setSellCheckBox(true);
+         sellChkFlg = true;
+         MT5SendMessage("Short: Rescue Mode Starting.");
+      }
+      
       //Trailing
       if(!buyChkFlg) TrailingStop(POSITION_TYPE_BUY, bid, i);
       if(!sellChkFlg) TrailingStop(POSITION_TYPE_SELL, ask, i);
@@ -790,7 +803,7 @@ void OnTimer() {
    panel.setLblJPNTime(TimeToString(convertToJapanTime(account_company_name), TIME_DATE| TIME_SECONDS));
 
    //オープンポジションが無い場合
-   if(PositionsTotal() == 0) return;
+//   if(PositionsTotal() == 0) return;
    
    //パネルを前面に
    int now = ObjectsTotal(0,0,-1);
@@ -854,8 +867,9 @@ void CloseAllPositions(ENUM_POSITION_TYPE pos_type, long magic) {
    int magic_idx = ArrayBsearch(MAGIC, magic);
    
    if(magic_idx < 0) return;
-   
+
    if(pos_type == POSITION_TYPE_BUY) {
+
       if(magic < 0) {
          //MAGIC = -1の場合は、Rescuemode
          for(int i=1; i<(int)MAGIC.Size(); i++) {
@@ -1179,50 +1193,62 @@ double getTakeProfitsPrice(ENUM_POSITION_TYPE pos_type) {
 
 bool CanTradeNow(const string symbol)
 {
+   // 1. ターミナル・EA設定（これがOFFなら、決済注文も飛ばせません）
    if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)) return false;
-   if(!MQLInfoInteger(MQL_TRADE_ALLOWED))          return false;
+   if(!MQLInfoInteger(MQL_TRADE_ALLOWED))           return false;
 
-   long trade_mode = 0;
-   if(!SymbolInfoInteger(symbol, SYMBOL_TRADE_MODE, trade_mode)) return false;
+   // 2. 取引モードの確認
+   // SYMBOL_TRADE_MODE_DISABLED（完全停止）の時だけ false を返す。
+   // CLOSEONLY（決済のみ可）や LONG/SHORTのみ可 の状態でも、決済のために true を返すべき。
+   long trade_mode = SymbolInfoInteger(symbol, SYMBOL_TRADE_MODE);
    if(trade_mode == SYMBOL_TRADE_MODE_DISABLED) return false;
 
-   // サーバ時刻で判定（テスターでもTimeTradeServer/TimeCurrentは動きます）
+   // 3. セッション判定（決済用なので、少し「甘め」に判定）
    datetime t = TimeTradeServer();
-   if(t == 0) t = TimeCurrent();
+   MqlDateTime dt;
+   TimeToStruct(t, dt);
+   int now_seconds = dt.hour * 3600 + dt.min * 60 + dt.sec;
 
-   MqlDateTime dt; TimeToStruct(t, dt);
-   if(dt.day_of_week == 0 || dt.day_of_week == 6) return false; // 日・土は基本NG（銘柄により例外あり）
-
-   // セッション判定（取引可能時間帯か）
-   datetime from = 0, to=0;
    bool in_session = false;
-   for(int i=0; i<10; i++)
+   for(int i = 0; i < 10; i++)
    {
+      datetime from, to;
       if(!SymbolInfoSessionTrade(symbol, (ENUM_DAY_OF_WEEK)dt.day_of_week, i, from, to))
          break;
-      if(from == 0 && to == 0) continue;
 
-      // from/to は「当日0:00からの秒」基準の datetime として返るブローカーが多い
-      // TimeCurrentと同じ日に揃えて比較
-      datetime day0 = (datetime)(t - (dt.hour*3600 + dt.min*60 + dt.sec));
-      datetime s_from = day0 + (from % 86400);
-      datetime s_to   = day0 + (to   % 86400);
+      int s_start = (int)((long)from % 86400);
+      int s_end   = (int)((long)to % 86400);
 
-      if(s_to < s_from) { // 日跨ぎ
-         if(t >= s_from || t <= s_to) in_session = true;
-      } else {
-         if(t >= s_from && t <= s_to) in_session = true;
+      // 24時間営業の銘柄 (s_start=0, s_end=0) または セッション内
+      if((s_start == 0 && s_end == 0) || (now_seconds >= s_start && now_seconds < s_end))
+      {
+         in_session = true;
+         break;
       }
-      if(in_session) break;
+      
+      // 終了時刻が 24:00 (0) のブローカー対策
+      if(s_end == 0 && now_seconds >= s_start)
+      {
+         in_session = true;
+         break;
+      }
    }
+
+   // 4. 【重要】セッション外でも「接続」が生きているなら、決済を試みる価値があるため
+   // セッションが false でも、サーバーと接続が切れていなければ true を返す「決済優先」の考え方
+   // もし完全にセッション厳守なら return in_session; だけでOK
    return in_session;
 }
 
 void ProcessForceClose()
 {
-   if(!CanTradeNow(Symbol())) return;
 
-   for(int m=0; m<(int)MAGIC.Size(); m++)
+   if(!CanCloseNow(Symbol())) return;
+
+   double balance1 = AccountInfoDouble(ACCOUNT_BALANCE);
+
+
+   for(int m=1; m<(int)MAGIC.Size(); m++)
    {
       //クローズすべきMAIGC毎のポジションが無い場合
       if(!ForceCloseBuy[m] && !ForceCloseSell[m])
@@ -1311,6 +1337,9 @@ void ProcessForceClose()
          }
       }
    }
+   double balance2 = AccountInfoDouble(ACCOUNT_BALANCE);
+
+   if(balance1 != balance2 ) MT5SendMessage(addcomma(balance2 - balance1,0));
 }
 
 void ResetBuyState(int magic_idx)
@@ -1500,4 +1529,28 @@ void RefreshFloatingProfitOnly()
          SellProfit[0] += g_positions[i].profit;         
       }
    }
+}
+
+void MT5SendMessage(string msg) {
+   bool res = SendNotification(msg);
+   if(!res) //エラーの場合
+   { 
+      Print("Error in MT5SendMessage. Error code  =",GetLastError()); 
+      MessageBox("Enable Push Notificaion and Add the MetaQuotesID of your SmartPhone Mt5"); 
+   }
+}
+
+bool CanCloseNow(const string symbol)
+{
+   if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)) return false;
+   if(!MQLInfoInteger(MQL_TRADE_ALLOWED))          return false;
+
+   long trade_mode = -1;
+   if(!SymbolInfoInteger(symbol, SYMBOL_TRADE_MODE, trade_mode))
+      return false;
+
+   if(trade_mode == SYMBOL_TRADE_MODE_DISABLED)
+      return false;
+
+   return true;
 }
