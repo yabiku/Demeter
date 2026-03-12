@@ -1294,31 +1294,7 @@ void ProcessForceClose()
             
          if(g_positions[i].type == POSITION_TYPE_SELL && !ForceCloseSell[m])
             continue;
-/*
-      for(int i=PositionsTotal()-1; i>=0; i--)
-      {
-         ulong ticket=PositionGetTicket(i);
-
-         if(!PositionSelectByTicket(ticket))
-            continue;
-
-         string sym=PositionGetString(POSITION_SYMBOL);
-         if(sym!=Symbol())
-            continue;
-
-         long magic=PositionGetInteger(POSITION_MAGIC);
-         if(magic!=MAGIC[m])
-            continue;
-
-         ENUM_POSITION_TYPE type=
-            (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-
-         if(type==POSITION_TYPE_BUY && !ForceCloseBuy[m])
-            continue;
-
-         if(type==POSITION_TYPE_SELL && !ForceCloseSell[m])
-            continue;
-*/
+            
          cnt++;
          if(g_positions[i].type == POSITION_TYPE_BUY) {
             longorshort = "Long";
