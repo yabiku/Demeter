@@ -1621,7 +1621,7 @@ double getStartLots() {
 //      lot = 0.2444*MathLog(balacne)-3.7406;
 //      lot = 0.15*MathLog(balacne)-2;
 //      lot = 0.1*MathLog(balacne)-1.3;
-      lot = balacne / 200000;
+      lot = balacne / 200000000;
    }
    return lot;
 }
