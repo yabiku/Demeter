@@ -678,12 +678,24 @@ void OnTick() {
       //エントリー
       int sig_entry = EntrySignal(MAGIC[i]);
       if(!buyChkFlg && isEntry == 0 && sig_entry>0 && BuyCount[0] == 0) {
+         double start_lot = 0.0;
+         if(EA_auto_lots) {
+            start_lot = getStartLots();
+         } else {
+            start_lot = EA_in_start_lots;
+         }
          trade.SetExpertMagicNumber(MAGIC[i]);
-         if(!trade.Buy(NormalizeLot(Symbol(), EA_in_start_lots))) printTradeError(trade);
+         if(!trade.Buy(NormalizeLot(Symbol(), start_lot))) printTradeError(trade);
       }
       if(!sellChkFlg && isEntry == 0 && sig_entry<0 && SellCount[0] == 0) {
+         double start_lot = 0.0;
+         if(EA_auto_lots) {
+            start_lot = getStartLots();
+         } else {
+            start_lot = EA_in_start_lots;
+         }
          trade.SetExpertMagicNumber(MAGIC[i]);
-         if(!trade.Sell(NormalizeLot(Symbol(), EA_in_start_lots))) printTradeError(trade);
+         if(!trade.Sell(NormalizeLot(Symbol(), start_lot))) printTradeError(trade);
       }
       
       //パネル表示
@@ -1589,4 +1601,27 @@ bool CanCloseNow(const string symbol)
       return false;
 
    return true;
+}
+
+//開始ロット数の計算
+double getStartLots() {
+   double balacne = AccountInfoDouble(ACCOUNT_BALANCE);
+   double lot = 0.0;
+      
+   if(StringFind(account_company_name, "Phillip") >=0) { //Phillip証券の場合
+      lot = 0.2*MathLog(balance)-1.6;
+   } else if(StringFind(account_company_name, "OANDA") >=0) { //OANDA証券の場合
+      lot = 0.00765*MathLog(balance)-1.0;
+   } else if(contract_size == 1.0) { //micro口座の場合
+//      lot = 0.1443*MathLog(balacne)-1.4195;
+//      lot = 0.15*MathLog(balacne)-1.5;
+//      lot = (balacne + 1)/737010; //線形
+      lot = balacne / 200000;
+   } else if(contract_size == 100.0) { // Standard口座の場合
+//      lot = 0.2444*MathLog(balacne)-3.7406;
+//      lot = 0.15*MathLog(balacne)-2;
+//      lot = 0.1*MathLog(balacne)-1.3;
+      lot = balacne / 200000;
+   }
+   return lot;
 }
