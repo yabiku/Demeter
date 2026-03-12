@@ -48,6 +48,7 @@ struct PosCache
    datetime open_time;
    double nanpin_price;
    datetime nanpin_time;
+   string symbol;
 };
 
 PosCache g_positions[];
@@ -110,6 +111,9 @@ input double nanpin_base_diff = 15; //ナンピン価格幅のベース
 input int nanpin_base_time = 5; //ナンピン時間差のベース(分)
 input double nanpin_lots_bairitsu = 1.5; //ナンピンロット倍率
 input double plusNanpin_lots_bairitsu = 1.2; //プラテン決済時のナンピンロット倍率
+
+bool  buyChkFlg = false;
+bool  sellChkFlg = false;
 
 enum startEnd {
    s = 0, //する（時間指定）
@@ -455,6 +459,11 @@ int OnInit()
    ObjectSetInteger(0, lblStatus, OBJPROP_XDISTANCE, 10);
    ObjectSetInteger(0, lblStatus, OBJPROP_YDISTANCE, 40);
    ObjectSetInteger(0, lblStatus, OBJPROP_FONTSIZE, 13);
+   
+   panel.setBuyCheckBox(true);
+   buyChkFlg = true;
+   panel.setSellCheckBox(true);
+   sellChkFlg = true;
 
    //パネル表示するやつは、パネルが表示されてから値をいれる
    for(int i=1; i<(int)MAGIC.Size(); i++) {
@@ -508,8 +517,8 @@ void OnTick() {
    Csymbol.RefreshRates();
    double ask = Csymbol.Ask();
    double bid = Csymbol.Bid();
-   bool buyChkFlg = false;
-   bool sellChkFlg = false;
+   buyChkFlg = false;
+   sellChkFlg = false;
 
    int isEntry = IsEntryOK();
    if(isEntry == 0) ObjectSetString(0, lblStatus, OBJPROP_TEXT, "稼働中");
@@ -1246,7 +1255,8 @@ void ProcessForceClose()
    if(!CanCloseNow(Symbol())) return;
 
    double balance1 = AccountInfoDouble(ACCOUNT_BALANCE);
-
+   int cnt = 0;
+   string longorshort = "";
 
    for(int m=1; m<(int)MAGIC.Size(); m++)
    {
@@ -1254,6 +1264,24 @@ void ProcessForceClose()
       if(!ForceCloseBuy[m] && !ForceCloseSell[m])
          continue;
 
+      for(int i=0; i<g_pos_count; i++) {
+         ulong ticket = g_positions[i].ticket;
+         
+         if(!PositionSelectByTicket(ticket))
+            continue;
+            
+         if(g_positions[i].symbol != Symbol())
+            continue;
+            
+         if(g_positions[i].magic_idx != m)
+            continue;
+            
+         if(g_positions[i].type == POSITION_TYPE_BUY && !ForceCloseBuy[m])
+            continue;
+            
+         if(g_positions[i].type == POSITION_TYPE_SELL && !ForceCloseSell[m])
+            continue;
+/*
       for(int i=PositionsTotal()-1; i>=0; i--)
       {
          ulong ticket=PositionGetTicket(i);
@@ -1277,7 +1305,13 @@ void ProcessForceClose()
 
          if(type==POSITION_TYPE_SELL && !ForceCloseSell[m])
             continue;
-
+*/
+         cnt++;
+         if(g_positions[i].type == POSITION_TYPE_BUY) {
+            longorshort = "Long";
+         } else {
+            longorshort = "Short";
+         }
          bool result = trade.PositionClose(ticket);
 
          if(!result)
@@ -1339,7 +1373,7 @@ void ProcessForceClose()
    }
    double balance2 = AccountInfoDouble(ACCOUNT_BALANCE);
 
-   if(balance1 != balance2 ) MT5SendMessage(addcomma(balance2 - balance1,0));
+   if(balance1 != balance2 ) MT5SendMessage(longorshort+":"+(string)cnt+"段:"+ addcomma(balance2 - balance1,0));
 }
 
 void ResetBuyState(int magic_idx)
@@ -1431,6 +1465,7 @@ void RefreshPositionsCacheFast()
       g_positions[g_pos_count].swap = swap;
       g_positions[g_pos_count].open_time = open_time;
       g_positions[g_pos_count].nanpin_time = open_time + (datetime)nanpin_late_time*60;
+      g_positions[g_pos_count].symbol = Symbol();
       if(type == POSITION_TYPE_BUY) {
          g_positions[g_pos_count].nanpin_price = price - nanpin_haba*10*Point();
       } else {
