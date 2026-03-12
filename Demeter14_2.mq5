@@ -1373,7 +1373,7 @@ void ProcessForceClose()
    }
    double balance2 = AccountInfoDouble(ACCOUNT_BALANCE);
 
-   if(balance1 != balance2 ) MT5SendMessage(longorshort+":"+(string)cnt+"段:"+ addcomma(balance2 - balance1,0));
+   if(SendNotificationTPFlg && balance1 != balance2 ) MT5SendMessage(longorshort+":"+(string)cnt+"段:"+ addcomma(balance2 - balance1,0));
 }
 
 void ResetBuyState(int magic_idx)
