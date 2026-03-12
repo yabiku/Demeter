@@ -420,6 +420,7 @@ int OnInit()
    EventSetTimer(1);
    
    //EAパラメータが変更されてても何もしない。
+   if(UninitializeReason() == REASON_CHARTCHANGE) return(INIT_SUCCEEDED);
    if(UninitializeReason() == REASON_PARAMETERS) return(INIT_SUCCEEDED);
    trade.SetDeviationInPoints(50);
    trade.SetAsyncMode(false);
